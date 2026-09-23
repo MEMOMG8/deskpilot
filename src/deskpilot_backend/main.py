@@ -12,10 +12,16 @@ from deskpilot_backend.models import (
     AssistantCommandResponse,
     CommandRequest,
     CommandResponse,
+    MicrophoneCommandRequest,
     SpeechRequest,
     SpeechResponse,
     TranscriptionResponse,
     VoiceCommandResponse,
+)
+from deskpilot_backend.microphone import (
+    AudioRecorder,
+    MicrophoneError,
+    record_microphone_wav,
 )
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
 from deskpilot_backend.transcription import (
@@ -40,6 +46,10 @@ def get_speech_engine_factory() -> SpeechEngineFactory | None:
 
 def get_transcription_service() -> WhisperTranscriptionService:
     return transcription_service
+
+
+def get_audio_recorder() -> AudioRecorder:
+    return record_microphone_wav
 
 
 @app.get("/api/v1/health")
@@ -146,6 +156,43 @@ async def create_voice_command(
             launcher=process_launcher,
             speech_engine_factory=speech_engine_factory,
         )
+    except EmptyAudioError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except UnsupportedAudioError as error:
+        raise HTTPException(status_code=415, detail=str(error)) from error
+    except TranscriptionServiceError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except UnsupportedActionError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post(
+    "/api/v1/microphone/commands",
+    response_model=VoiceCommandResponse,
+    response_model_exclude_none=True,
+)
+def create_microphone_command(
+    request: MicrophoneCommandRequest,
+    recorder: AudioRecorder = Depends(get_audio_recorder),
+    service: WhisperTranscriptionService = Depends(get_transcription_service),
+    process_launcher: ProcessLauncher | None = Depends(get_process_launcher),
+    speech_engine_factory: SpeechEngineFactory | None = Depends(
+        get_speech_engine_factory
+    ),
+) -> VoiceCommandResponse:
+    try:
+        audio_bytes = recorder(request.duration_seconds)
+        return handle_voice_command(
+            audio_bytes,
+            content_type="audio/wav",
+            filename="microphone.wav",
+            speak=request.speak,
+            transcription_service=service,
+            launcher=process_launcher,
+            speech_engine_factory=speech_engine_factory,
+        )
+    except MicrophoneError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except EmptyAudioError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except UnsupportedAudioError as error:

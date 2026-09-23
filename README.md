@@ -1,6 +1,6 @@
 # DeskPilot
 
-DeskPilot is a local-first Windows desktop voice assistant portfolio project. This milestone contains a minimal Python backend with a deterministic typed-command router, safe calculator execution, assistant orchestration, local text-to-speech, and offline file transcription.
+DeskPilot is a local-first Windows desktop voice assistant portfolio project. This milestone contains a minimal Python backend with a deterministic typed-command router, safe calculator execution, assistant orchestration, local text-to-speech, offline file transcription, and explicit local microphone commands.
 
 ## Local Setup
 
@@ -10,7 +10,7 @@ python -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
-The install includes `pyttsx3`, which uses the local Windows SAPI voice for text-to-speech, plus `faster-whisper` and `python-multipart` for offline audio-file transcription.
+The install includes `pyttsx3`, which uses the local Windows SAPI voice for text-to-speech, `faster-whisper` and `python-multipart` for offline audio-file transcription, and `sounddevice` for explicit local microphone capture.
 
 ## Run Tests
 
@@ -35,6 +35,7 @@ Then visit `http://127.0.0.1:8000/api/v1/health`.
 - `POST /api/v1/speech/speak`
 - `POST /api/v1/transcriptions`
 - `POST /api/v1/voice/commands`
+- `POST /api/v1/microphone/commands`
 
 ## Manual Speech Check
 
@@ -62,4 +63,12 @@ Record a short English command such as "open calculator" with Windows Voice Reco
 
 ```powershell
 curl.exe -X POST "http://127.0.0.1:8000/api/v1/voice/commands" -F "audio_file=@C:\path\to\recording.wav;type=audio/wav" -F "speak=true"
+```
+
+## Manual Microphone Command Check
+
+This request records locally for 4 seconds, so speak "open calculator" immediately after sending it. The request blocks while recording, then transcribes locally and runs the existing voice-command flow.
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8000/api/v1/microphone/commands" -H "Content-Type: application/json" -d "{\"duration_seconds\":4,\"speak\":true}"
 ```

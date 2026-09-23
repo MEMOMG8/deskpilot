@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class CommandRequest(BaseModel):
@@ -80,3 +80,8 @@ class TranscriptionResponse(BaseModel):
 class VoiceCommandResponse(BaseModel):
     transcription: TranscriptionResponse
     assistant: AssistantCommandResponse
+
+
+class MicrophoneCommandRequest(BaseModel):
+    duration_seconds: int = Field(ge=1, le=10)
+    speak: bool = False
