@@ -25,3 +25,15 @@ class CommandResponse(BaseModel):
     requires_confirmation: bool
     message: str
     action: CommandAction | None = None
+
+
+class ActionExecutionRequest(BaseModel):
+    type: str
+    target: str
+
+
+class ActionExecutionResponse(BaseModel):
+    status: Literal["executed"]
+    executed: bool
+    action: ActionExecutionRequest
+    message: str

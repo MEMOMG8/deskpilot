@@ -28,3 +28,4 @@ Then visit `http://127.0.0.1:8000/api/v1/health`.
 
 - `GET /api/v1/health`
 - `POST /api/v1/commands`
+- `POST /api/v1/actions/execute`

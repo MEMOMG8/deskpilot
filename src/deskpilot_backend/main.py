@@ -1,7 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
+from deskpilot_backend.actions import UnsupportedActionError, execute_action
 from deskpilot_backend.commands import route_command
-from deskpilot_backend.models import CommandRequest, CommandResponse
+from deskpilot_backend.models import (
+    ActionExecutionRequest,
+    ActionExecutionResponse,
+    CommandRequest,
+    CommandResponse,
+)
 
 app = FastAPI(title="DeskPilot")
 
@@ -18,3 +24,13 @@ def health_check() -> dict[str, str]:
 )
 def create_command(command: CommandRequest) -> CommandResponse:
     return route_command(command.text)
+
+
+@app.post("/api/v1/actions/execute", response_model=ActionExecutionResponse)
+def execute_planned_action(
+    action: ActionExecutionRequest,
+) -> ActionExecutionResponse:
+    try:
+        return execute_action(action)
+    except UnsupportedActionError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
