@@ -9,12 +9,19 @@ from deskpilot_backend.models import (
     AssistantCommandResponse,
     CommandRequest,
     CommandResponse,
+    SpeechRequest,
+    SpeechResponse,
 )
+from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
 
 app = FastAPI(title="DeskPilot")
 
 
 def get_process_launcher() -> ProcessLauncher | None:
+    return None
+
+
+def get_speech_engine_factory() -> SpeechEngineFactory | None:
     return None
 
 
@@ -55,3 +62,14 @@ def create_assistant_command(
         return handle_assistant_command(command, launcher=process_launcher)
     except UnsupportedActionError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/api/v1/speech/speak", response_model=SpeechResponse)
+def create_speech(
+    speech: SpeechRequest,
+    engine_factory: SpeechEngineFactory | None = Depends(get_speech_engine_factory),
+) -> SpeechResponse:
+    try:
+        return speak_text(speech.text, engine_factory=engine_factory)
+    except SpeechEngineError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error

@@ -45,3 +45,19 @@ class AssistantCommandResponse(BaseModel):
     requires_confirmation: bool
     message: str
     action: CommandAction | None = None
+
+
+class SpeechRequest(BaseModel):
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def text_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("text must not be empty")
+        return value
+
+
+class SpeechResponse(BaseModel):
+    status: Literal["completed"]
+    message: str

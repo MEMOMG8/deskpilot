@@ -9,6 +9,7 @@ description = "Local-first Windows desktop voice assistant backend foundation."
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.100",
+    "pyttsx3>=2.90",
     "uvicorn[standard]>=0.23",
 ]
 
