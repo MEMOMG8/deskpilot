@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deskpilot"
+version = "0.1.0"
+description = "Local-first Windows desktop voice assistant backend foundation."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.23",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx2>=0.1",
+    "pytest>=7.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
