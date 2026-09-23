@@ -16,6 +16,17 @@ htmlcov/
 .env.*
 !.env.example
 
+# Local DeskPilot data and demo artifacts
+DeskPilot/
+settings.json
+reminders.json
+*.wav
+*.mp3
+*.m4a
+*.mp4
+*.webm
+*.ogg
+
 dist/
 build/
 *.egg-info/

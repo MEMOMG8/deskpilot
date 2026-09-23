@@ -1,8 +1,26 @@
 # DeskPilot
 
-DeskPilot is a local-first Windows desktop voice assistant portfolio project. This milestone contains a minimal Python backend with a deterministic typed-command router, safe calculator execution, assistant orchestration, local text-to-speech, offline file transcription, explicit local microphone commands, and a native Windows tray shell.
+DeskPilot is a local-first Windows voice assistant that demonstrates safe native automation with offline speech, deterministic command routing, and explicit allowlisted actions.
 
-## Local Setup
+## Features
+
+- Native Windows tray shell with local wake-word activation: "Hey Jarvis"
+- Push-to-talk browser demo and API endpoints for typed, uploaded-audio, and microphone commands
+- Offline transcription with `faster-whisper` and local Windows SAPI text-to-speech through `pyttsx3`
+- Deterministic English command router with no fuzzy matching, LLM, or cloud API
+- Strict allowlisted execution for apps, fixed websites, bounded search, media keys, workspace shortcuts, notes, reminders, and settings
+- Local notes, reminders, and settings stored under `~/Documents/DeskPilot`
+- Unit-tested services with mocked microphone, speech, wake word, process launching, and timers
+
+## Privacy And Safety
+
+DeskPilot is designed to keep user data and voice processing local. Audio is captured only after an explicit button press or enabled local wake-word detection, then processed locally. Notes, reminders, and settings are plain local files under `~/Documents/DeskPilot`.
+
+Safety is enforced with deterministic parsing and explicit allowlists. DeskPilot does not execute arbitrary text, shell commands, paths, URLs, or user-provided executables. Search queries are URL-encoded into trusted search endpoints, and custom aliases may only point to already-supported fixed commands.
+
+See [SECURITY.md](SECURITY.md) for the safety model and disclosure guidance.
+
+## Quick Start
 
 ```powershell
 python -m venv .venv
@@ -10,15 +28,7 @@ python -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
-The install includes `pyttsx3`, which uses the local Windows SAPI voice for text-to-speech, `faster-whisper` and `python-multipart` for offline audio-file transcription, `sounddevice` for explicit local microphone capture, `PySide6` for the native Windows tray shell, and `openwakeword` for local wake-word detection.
-
-## Run Tests
-
-```powershell
-python -m pytest
-```
-
-## Run The API
+Run the API:
 
 ```powershell
 python -m uvicorn deskpilot_backend.main:app --reload
@@ -26,28 +36,43 @@ python -m uvicorn deskpilot_backend.main:app --reload
 
 Then visit `http://127.0.0.1:8000/api/v1/health`.
 
-## Browser Demo
-
-Open `http://127.0.0.1:8000`, click `Talk (4 seconds)`, and say "open calculator" immediately. The browser calls the existing local microphone command endpoint.
-
-## Native Desktop Shell
+Run the native tray shell:
 
 ```powershell
 python -m deskpilot_backend.desktop
 ```
 
-DeskPilot starts in the Windows system tray. Use the tray menu to choose `Show listening border`, `Hide border`, `Start wake word listening`, `Stop wake word listening`, or `Quit DeskPilot`. Wake-word listening is off by default.
+DeskPilot starts in the Windows system tray. Use the tray menu to start or stop wake-word listening, show or hide the overlay, or quit.
 
-For the native end-to-end demo, choose `Start wake word listening`, say "Hey Jarvis", then speak "open calculator" while the cyan listening border is visible. DeskPilot plays a short local Windows cue when command recording begins, stops the wake-word microphone stream, records one short local command, transcribes it locally, runs the existing allowlisted assistant action flow, narrates the response with local TTS, hides the border, and resumes wake-word listening if it is still enabled.
+## Browser Demo
+
+With the API running, open `http://127.0.0.1:8000`, click `Talk (4 seconds)`, and say "open calculator". The browser calls the existing local microphone command endpoint.
+
+## Native Voice Demo
+
+Start the tray app, choose `Start wake word listening`, say "Hey Jarvis", then speak a supported command while the cyan listening border is visible. DeskPilot plays a short local Windows cue when command recording begins, stops the wake-word microphone stream, records one local command, transcribes it locally, runs the allowlisted assistant flow, narrates the response with local TTS, hides the border, and resumes wake-word listening if it is still enabled.
 
 Native voice states:
 
-- Cyan: listening for the 4-second command
+- Cyan: listening for the command
 - Amber: processing transcription and the allowlisted action
 - Green: completed successfully, then hides
 - Red: recoverable error or unknown command, then hides
 
 The first wake-word start may download/cache openWakeWord's local `hey_jarvis` model. openWakeWord code is Apache-2.0 licensed, while its included pre-trained models are licensed CC BY-NC-SA 4.0.
+
+## Tests
+
+```powershell
+python -m pytest
+python -m compileall src
+```
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [90-second demo script](docs/demo-script.md)
+- [Security](SECURITY.md)
 
 ## Local Settings
 
@@ -65,7 +90,7 @@ DeskPilot stores local preferences in `~/Documents/DeskPilot/settings.json`. The
 
 `command_capture_duration_seconds` is allowed from `2` through `8`; invalid values fall back to `4`. `recording_start_cue_enabled` controls the local Windows cue before native command recording. `wake_listening_on_startup` starts wake-word listening when the tray shell opens.
 
-Custom aliases map one fixed phrase to an existing fixed command ID, for example:
+Custom aliases map one fixed phrase to an existing fixed command ID:
 
 ```json
 {
@@ -177,44 +202,8 @@ Media commands:
 - `previous song`
 - `previous track`
 
-Media controls use fixed Windows virtual media keys and affect the active Windows media session.
-Workspace shortcuts use fixed Windows targets only. Folder shortcuts are derived from known local user directories; DeskPilot never accepts spoken paths. System status commands are read-only and use standard-library or Windows `ctypes` calls.
+Media controls use fixed Windows virtual media keys and affect the active Windows media session. Workspace shortcuts use fixed Windows targets only. Folder shortcuts are derived from known local user directories; DeskPilot never accepts spoken paths. System status commands are read-only and use standard-library or Windows `ctypes` calls.
+
 Fixed-site commands use exact allowlisted HTTPS URLs. Search commands encode the query into the trusted search site's `q` parameter and open the results in the default browser; DeskPilot does not make direct HTTP requests.
-Notes are saved as plain-text UTF-8 `.txt` files under `~/Documents/DeskPilot/notes`. DeskPilot never accepts spoken note paths or filenames, never overwrites an existing note, and does not sync or send note content anywhere.
-Reminders accept digit minutes or deterministic English number words up to 1440 minutes, such as `a minute`, `one minute`, and `twenty five minutes`. They are saved locally in `~/Documents/DeskPilot/reminders.json`, reloaded on startup, and scheduled from their saved due times. When a reminder is due, DeskPilot shows a native tray notification and says `Reminder: <text>` with local TTS. Reminder content stays local and is not synced or sent anywhere.
 
-## Manual Speech Check
-
-```powershell
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/speech/speak -ContentType 'application/json' -Body '{"text":"Hello Manuel, DeskPilot is ready."}' | ConvertTo-Json -Depth 5
-```
-
-## Manual Assistant Narration Check
-
-```powershell
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/assistant/commands -ContentType 'application/json' -Body '{"text":"open calculator","speak":true}' | ConvertTo-Json -Depth 5
-```
-
-## Manual Transcription Check
-
-The first real transcription may download the local `tiny.en` Whisper model. After that, transcription runs locally on CPU.
-
-```powershell
-curl.exe -X POST "http://127.0.0.1:8000/api/v1/transcriptions" -F "audio_file=@C:\path\to\recording.wav;type=audio/wav"
-```
-
-## Manual Voice Command Check
-
-Record a short English command such as "open calculator" with Windows Voice Recorder. The first real transcription may download the local `tiny.en` Whisper model; after that, transcription runs locally on CPU.
-
-```powershell
-curl.exe -X POST "http://127.0.0.1:8000/api/v1/voice/commands" -F "audio_file=@C:\path\to\recording.wav;type=audio/wav" -F "speak=true"
-```
-
-## Manual Microphone Command Check
-
-This request records locally for 4 seconds, so speak "open calculator" immediately after sending it. The request blocks while recording, then transcribes locally and runs the existing voice-command flow.
-
-```powershell
-curl.exe -X POST "http://127.0.0.1:8000/api/v1/microphone/commands" -H "Content-Type: application/json" -d "{\"duration_seconds\":4,\"speak\":true}"
-```
+Notes are saved as UTF-8 `.txt` files under `~/Documents/DeskPilot/notes`. Reminders are saved locally in `~/Documents/DeskPilot/reminders.json`, reloaded on startup, and scheduled from saved due times. When a reminder is due, DeskPilot shows a native tray notification and says `Reminder: <text>` with local TTS.
