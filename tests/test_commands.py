@@ -1,31 +1,42 @@
+from datetime import datetime
+
+import pytest
 from fastapi.testclient import TestClient
 
-from deskpilot_backend.commands import route_command
+from deskpilot_backend.commands import HELP_MESSAGE, route_command
 from deskpilot_backend.main import app
 
 
-def assert_calculator_action_is_recognized(text: str) -> None:
+@pytest.mark.parametrize(
+    ("text", "target", "display_name"),
+    [
+        ("open calculator", "calculator", "Calculator"),
+        ("Open calculator.", "calculator", "Calculator"),
+        ("  OPEN   CALCULATOR!  ", "calculator", "Calculator"),
+        ("open notepad", "notepad", "Notepad"),
+        ("open file explorer", "file_explorer", "File Explorer"),
+        ("open explorer", "file_explorer", "File Explorer"),
+        ("open settings", "settings", "Windows Settings"),
+        ("open browser", "browser", "the default browser"),
+    ],
+)
+def test_application_commands_are_recognized(
+    text: str,
+    target: str,
+    display_name: str,
+) -> None:
     response = route_command(text)
 
     assert response.model_dump(exclude_none=True) == {
         "intent": "open_app",
         "status": "planned",
         "requires_confirmation": False,
-        "action": {"type": "open_app", "target": "calculator"},
-        "message": "Calculator was recognized, but DeskPilot will not launch apps yet.",
+        "action": {"type": "open_app", "target": target},
+        "message": (
+            f"{display_name} was recognized, "
+            "but DeskPilot will not launch apps yet."
+        ),
     }
-
-
-def test_open_calculator_is_recognized() -> None:
-    assert_calculator_action_is_recognized("open calculator")
-
-
-def test_open_calculator_with_capitalization_and_period_is_recognized() -> None:
-    assert_calculator_action_is_recognized("Open calculator.")
-
-
-def test_open_calculator_with_extra_whitespace_case_and_punctuation_is_recognized() -> None:
-    assert_calculator_action_is_recognized("  OPEN   CALCULATOR!  ")
 
 
 def test_commands_endpoint_returns_calculator_plan() -> None:
@@ -58,19 +69,60 @@ def test_open_calculator_please_remains_unsupported() -> None:
     assert response.status == "not_supported"
 
 
-def test_help_is_recognized() -> None:
-    response = route_command("help")
+@pytest.mark.parametrize("text", ["help", "what can you do"])
+def test_help_commands_are_recognized(text: str) -> None:
+    response = route_command(text)
 
     assert response.model_dump(exclude_none=True) == {
         "intent": "help",
         "status": "completed",
         "requires_confirmation": False,
-        "message": 'Supported commands: "open calculator" and "help".',
+        "message": HELP_MESSAGE,
     }
 
 
+@pytest.mark.parametrize("text", ["what time is it", "what's the time"])
+def test_time_commands_return_local_time(text: str) -> None:
+    response = route_command(
+        text,
+        now_factory=lambda: datetime(2026, 9, 23, 18, 30),
+    )
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "get_time",
+        "status": "completed",
+        "requires_confirmation": False,
+        "message": "It is 6:30 PM.",
+    }
+
+
+@pytest.mark.parametrize("text", ["what is the date", "what's today's date"])
+def test_date_commands_return_local_date(text: str) -> None:
+    response = route_command(
+        text,
+        now_factory=lambda: datetime(2026, 9, 23, 18, 30),
+    )
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "get_date",
+        "status": "completed",
+        "requires_confirmation": False,
+        "message": "Today is September 23, 2026.",
+    }
+
+
+def test_curly_apostrophes_are_normalized_for_defined_aliases() -> None:
+    response = route_command(
+        "What’s today’s date?",
+        now_factory=lambda: datetime(2026, 9, 23, 18, 30),
+    )
+
+    assert response.intent == "get_date"
+    assert response.message == "Today is September 23, 2026."
+
+
 def test_unknown_command_is_not_supported() -> None:
-    response = route_command("open notepad")
+    response = route_command("open paint")
 
     assert response.model_dump(exclude_none=True) == {
         "intent": "unknown",

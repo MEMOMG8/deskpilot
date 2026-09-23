@@ -24,7 +24,7 @@ def handle_assistant_command(
         )
         return _maybe_narrate_response(response, command.speak, speech_engine_factory)
 
-    execute_action(
+    action_response = execute_action(
         ActionExecutionRequest(
             type=routed_command.action.type,
             target=routed_command.action.target,
@@ -37,7 +37,7 @@ def handle_assistant_command(
         status="executed",
         requires_confirmation=routed_command.requires_confirmation,
         action=routed_command.action,
-        message="Calculator was recognized and launch was requested.",
+        message=action_response.message,
     )
     return _maybe_narrate_response(response, command.speak, speech_engine_factory)
 

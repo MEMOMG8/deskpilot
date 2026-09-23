@@ -130,7 +130,7 @@ def test_voice_command_transcribes_open_calculator_and_executes_safely() -> None
             "intent": "open_app",
             "status": "executed",
             "requires_confirmation": False,
-            "message": "Calculator was recognized and launch was requested.",
+            "message": "Opening Calculator.",
             "speech_result": "not_requested",
             "action": {"type": "open_app", "target": "calculator"},
         },
@@ -158,7 +158,7 @@ def test_voice_command_forwards_speak_true_to_assistant_narration() -> None:
     assert response.status_code == 200
     assert response.json()["assistant"]["speech_result"] == "completed"
     assert launcher.commands == [["calc.exe"]]
-    assert engine.spoken_text == ["Calculator was recognized and launch was requested."]
+    assert engine.spoken_text == ["Opening Calculator."]
     assert engine.completed is True
 
 

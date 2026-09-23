@@ -53,6 +53,26 @@ The first wake-word start may download/cache openWakeWord's local `hey_jarvis` m
 - `POST /api/v1/voice/commands`
 - `POST /api/v1/microphone/commands`
 
+## Supported Commands
+
+Application commands:
+
+- `open calculator`
+- `open notepad`
+- `open file explorer`
+- `open explorer`
+- `open settings`
+- `open browser`
+
+Information commands:
+
+- `what time is it`
+- `what's the time`
+- `what is the date`
+- `what's today's date`
+- `help`
+- `what can you do`
+
 ## Manual Speech Check
 
 ```powershell

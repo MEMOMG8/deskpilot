@@ -96,7 +96,7 @@ def test_native_voice_command_uses_existing_voice_pipeline_with_speech() -> None
         }
     ]
     assert launcher.commands == [["calc.exe"]]
-    assert engine.spoken_text == ["Calculator was recognized and launch was requested."]
+    assert engine.spoken_text == ["Opening Calculator."]
     assert engine.completed is True
 
 

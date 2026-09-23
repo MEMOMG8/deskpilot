@@ -16,11 +16,11 @@ class CommandRequest(BaseModel):
 
 class CommandAction(BaseModel):
     type: Literal["open_app"]
-    target: Literal["calculator"]
+    target: Literal["calculator", "notepad", "file_explorer", "settings", "browser"]
 
 
 class CommandResponse(BaseModel):
-    intent: Literal["open_app", "help", "unknown"]
+    intent: Literal["open_app", "get_time", "get_date", "help", "unknown"]
     status: Literal["planned", "completed", "not_supported"]
     requires_confirmation: bool
     message: str
@@ -40,7 +40,7 @@ class ActionExecutionResponse(BaseModel):
 
 
 class AssistantCommandResponse(BaseModel):
-    intent: Literal["open_app", "help", "unknown"]
+    intent: Literal["open_app", "get_time", "get_date", "help", "unknown"]
     status: Literal["executed", "completed", "not_supported"]
     requires_confirmation: bool
     message: str

@@ -139,7 +139,7 @@ def test_microphone_command_forwards_speak_true() -> None:
 
     assert response.status_code == 200
     assert response.json()["assistant"]["speech_result"] == "completed"
-    assert engine.spoken_text == ["Calculator was recognized and launch was requested."]
+    assert engine.spoken_text == ["Opening Calculator."]
     assert launcher.commands == [["calc.exe"]]
 
 
