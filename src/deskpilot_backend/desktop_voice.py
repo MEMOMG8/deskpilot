@@ -1,7 +1,11 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from deskpilot_backend.actions import ProcessLauncher, UnsupportedActionError
+from deskpilot_backend.actions import (
+    KeyEventSender,
+    ProcessLauncher,
+    UnsupportedActionError,
+)
 from deskpilot_backend.microphone import AudioRecorder, MicrophoneError, record_microphone_wav
 from deskpilot_backend.models import VoiceCommandResponse
 from deskpilot_backend.speech import SpeechEngineFactory
@@ -29,6 +33,7 @@ class NativeVoiceCommandService:
     )
     recorder: AudioRecorder = record_microphone_wav
     launcher: ProcessLauncher | None = None
+    key_event_sender: KeyEventSender | None = None
     speech_engine_factory: SpeechEngineFactory | None = None
 
     def run(self) -> VoiceCommandResponse:
@@ -41,6 +46,7 @@ class NativeVoiceCommandService:
                 speak=True,
                 transcription_service=self.transcription_service,
                 launcher=self.launcher,
+                key_event_sender=self.key_event_sender,
                 speech_engine_factory=self.speech_engine_factory,
             )
         except (

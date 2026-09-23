@@ -5,7 +5,12 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from deskpilot_backend.actions import ProcessLauncher, UnsupportedActionError, execute_action
+from deskpilot_backend.actions import (
+    KeyEventSender,
+    ProcessLauncher,
+    UnsupportedActionError,
+    execute_action,
+)
 from deskpilot_backend.assistant import handle_assistant_command
 from deskpilot_backend.commands import route_command
 from deskpilot_backend.models import (
@@ -46,6 +51,10 @@ def get_process_launcher() -> ProcessLauncher | None:
     return None
 
 
+def get_key_event_sender() -> KeyEventSender | None:
+    return None
+
+
 def get_speech_engine_factory() -> SpeechEngineFactory | None:
     return None
 
@@ -80,9 +89,10 @@ def create_command(command: CommandRequest) -> CommandResponse:
 @app.post("/api/v1/actions/execute", response_model=ActionExecutionResponse)
 def execute_planned_action(
     action: ActionExecutionRequest,
+    key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
 ) -> ActionExecutionResponse:
     try:
-        return execute_action(action)
+        return execute_action(action, key_event_sender=key_event_sender)
     except UnsupportedActionError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -95,6 +105,7 @@ def execute_planned_action(
 def create_assistant_command(
     command: AssistantCommandRequest,
     process_launcher: ProcessLauncher | None = Depends(get_process_launcher),
+    key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -103,6 +114,7 @@ def create_assistant_command(
         return handle_assistant_command(
             command,
             launcher=process_launcher,
+            key_event_sender=key_event_sender,
             speech_engine_factory=speech_engine_factory,
         )
     except UnsupportedActionError as error:
@@ -151,6 +163,7 @@ async def create_voice_command(
     speak: Annotated[bool, Form()] = False,
     service: WhisperTranscriptionService = Depends(get_transcription_service),
     process_launcher: ProcessLauncher | None = Depends(get_process_launcher),
+    key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -165,6 +178,7 @@ async def create_voice_command(
             speak=speak,
             transcription_service=service,
             launcher=process_launcher,
+            key_event_sender=key_event_sender,
             speech_engine_factory=speech_engine_factory,
         )
     except EmptyAudioError as error:
@@ -187,6 +201,7 @@ def create_microphone_command(
     recorder: AudioRecorder = Depends(get_audio_recorder),
     service: WhisperTranscriptionService = Depends(get_transcription_service),
     process_launcher: ProcessLauncher | None = Depends(get_process_launcher),
+    key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -200,6 +215,7 @@ def create_microphone_command(
             speak=request.speak,
             transcription_service=service,
             launcher=process_launcher,
+            key_event_sender=key_event_sender,
             speech_engine_factory=speech_engine_factory,
         )
     except MicrophoneError as error:

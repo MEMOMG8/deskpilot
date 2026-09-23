@@ -69,6 +69,43 @@ def test_open_calculator_please_remains_unsupported() -> None:
     assert response.status == "not_supported"
 
 
+@pytest.mark.parametrize(
+    ("text", "target"),
+    [
+        ("volume up", "volume_up"),
+        ("turn volume up", "volume_up"),
+        ("volume down", "volume_down"),
+        ("turn volume down", "volume_down"),
+        ("mute", "mute"),
+        ("mute volume", "mute"),
+        ("play music", "play_pause"),
+        ("pause music", "play_pause"),
+        ("next song", "next_track"),
+        ("next track", "next_track"),
+        ("previous song", "previous_track"),
+        ("previous track", "previous_track"),
+    ],
+)
+def test_media_commands_are_recognized(text: str, target: str) -> None:
+    response = route_command(text)
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "media_control",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "media_key", "target": target},
+        "message": "Media control was recognized, but DeskPilot will not send it yet.",
+    }
+
+
+def test_media_commands_keep_deterministic_normalization() -> None:
+    response = route_command("  TURN   VOLUME   UP!  ")
+
+    assert response.intent == "media_control"
+    assert response.action is not None
+    assert response.action.model_dump() == {"type": "media_key", "target": "volume_up"}
+
+
 @pytest.mark.parametrize("text", ["help", "what can you do"])
 def test_help_commands_are_recognized(text: str) -> None:
     response = route_command(text)
@@ -130,6 +167,13 @@ def test_unknown_command_is_not_supported() -> None:
         "requires_confirmation": False,
         "message": "That command is not supported yet.",
     }
+
+
+def test_unknown_media_like_command_is_not_supported() -> None:
+    response = route_command("play song")
+
+    assert response.intent == "unknown"
+    assert response.status == "not_supported"
 
 
 def test_commands_endpoint_rejects_blank_text() -> None:

@@ -1,4 +1,4 @@
-from deskpilot_backend.actions import ProcessLauncher
+from deskpilot_backend.actions import KeyEventSender, ProcessLauncher
 from deskpilot_backend.assistant import handle_assistant_command
 from deskpilot_backend.models import (
     AssistantCommandRequest,
@@ -18,6 +18,7 @@ def handle_voice_command(
     speak: bool,
     transcription_service: WhisperTranscriptionService,
     launcher: ProcessLauncher | None = None,
+    key_event_sender: KeyEventSender | None = None,
     speech_engine_factory: SpeechEngineFactory | None = None,
 ) -> VoiceCommandResponse:
     transcription = transcription_service.transcribe(
@@ -40,6 +41,7 @@ def handle_voice_command(
     assistant_response = handle_assistant_command(
         AssistantCommandRequest(text=transcription.text, speak=speak),
         launcher=launcher,
+        key_event_sender=key_event_sender,
         speech_engine_factory=speech_engine_factory,
     )
 

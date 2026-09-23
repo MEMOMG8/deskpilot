@@ -73,6 +73,26 @@ Information commands:
 - `help`
 - `what can you do`
 
+Volume commands:
+
+- `volume up`
+- `turn volume up`
+- `volume down`
+- `turn volume down`
+- `mute`
+- `mute volume`
+
+Media commands:
+
+- `play music`
+- `pause music`
+- `next song`
+- `next track`
+- `previous song`
+- `previous track`
+
+Media controls use fixed Windows virtual media keys and affect the active Windows media session.
+
 ## Manual Speech Check
 
 ```powershell

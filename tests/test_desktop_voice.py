@@ -1,5 +1,6 @@
 import pytest
 
+from deskpilot_backend.actions import KEYEVENTF_KEYUP, VK_MEDIA_PLAY_PAUSE
 from deskpilot_backend.desktop_state import NativeWakeWordCommandController
 from deskpilot_backend.desktop_voice import (
     NATIVE_COMMAND_DURATION_SECONDS,
@@ -44,6 +45,15 @@ class RecordingLauncher:
 
     def __call__(self, command: list[str]) -> object:
         self.commands.append(command)
+        return object()
+
+
+class RecordingKeyEventSender:
+    def __init__(self) -> None:
+        self.events: list[tuple[int, int]] = []
+
+    def __call__(self, virtual_key: int, flags: int) -> object:
+        self.events.append((virtual_key, flags))
         return object()
 
 
@@ -98,6 +108,34 @@ def test_native_voice_command_uses_existing_voice_pipeline_with_speech() -> None
     assert launcher.commands == [["calc.exe"]]
     assert engine.spoken_text == ["Opening Calculator."]
     assert engine.completed is True
+
+
+def test_native_voice_command_can_execute_mocked_media_key_command() -> None:
+    wav_audio = encode_wav(b"\x00\x00" * 16000)
+    recorder = FakeRecorder(wav_audio)
+    launcher = RecordingLauncher()
+    key_event_sender = RecordingKeyEventSender()
+    engine = FakeSpeechEngine()
+    service = NativeVoiceCommandService(
+        transcription_service=FakeTranscriptionService("pause music"),
+        recorder=recorder,
+        launcher=launcher,
+        key_event_sender=key_event_sender,
+        speech_engine_factory=lambda: engine,
+    )
+
+    response = service.run()
+
+    assert response.assistant.intent == "media_control"
+    assert response.assistant.status == "executed"
+    assert response.assistant.message == "Toggling media playback."
+    assert response.assistant.speech_result == "completed"
+    assert launcher.commands == []
+    assert key_event_sender.events == [
+        (VK_MEDIA_PLAY_PAUSE, 0),
+        (VK_MEDIA_PLAY_PAUSE, KEYEVENTF_KEYUP),
+    ]
+    assert engine.spoken_text == ["Toggling media playback."]
 
 
 def test_native_voice_command_failure_is_controlled() -> None:

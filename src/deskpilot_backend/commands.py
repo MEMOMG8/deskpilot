@@ -9,7 +9,9 @@ TERMINAL_PUNCTUATION = ".,!?"
 HELP_MESSAGE = (
     "Supported commands: open calculator; open notepad; open file explorer; "
     "open explorer; open settings; open browser; what time is it; what's the time; "
-    "what is the date; what's today's date; help; what can you do."
+    "what is the date; what's today's date; volume up; turn volume up; "
+    "volume down; turn volume down; mute; mute volume; play music; pause music; "
+    "next song; next track; previous song; previous track; help; what can you do."
 )
 
 
@@ -26,6 +28,21 @@ APPLICATION_COMMANDS = {
     "open explorer": ApplicationCommand("file_explorer", "File Explorer"),
     "open settings": ApplicationCommand("settings", "Windows Settings"),
     "open browser": ApplicationCommand("browser", "the default browser"),
+}
+
+MEDIA_COMMANDS = {
+    "volume up": "volume_up",
+    "turn volume up": "volume_up",
+    "volume down": "volume_down",
+    "turn volume down": "volume_down",
+    "mute": "mute",
+    "mute volume": "mute",
+    "play music": "play_pause",
+    "pause music": "play_pause",
+    "next song": "next_track",
+    "next track": "next_track",
+    "previous song": "previous_track",
+    "previous track": "previous_track",
 }
 
 TIME_COMMANDS = {"what time is it", "what's the time"}
@@ -61,6 +78,15 @@ def route_command(
                 f"{command.display_name} was recognized, "
                 "but DeskPilot will not launch apps yet."
             ),
+        )
+
+    if normalized_text in MEDIA_COMMANDS:
+        return CommandResponse(
+            intent="media_control",
+            status="planned",
+            requires_confirmation=False,
+            action=CommandAction(type="media_key", target=MEDIA_COMMANDS[normalized_text]),
+            message="Media control was recognized, but DeskPilot will not send it yet.",
         )
 
     if normalized_text in TIME_COMMANDS:

@@ -4,8 +4,14 @@ from contextlib import contextmanager
 import pytest
 from fastapi.testclient import TestClient
 
+from deskpilot_backend.actions import KEYEVENTF_KEYUP, VK_MEDIA_PLAY_PAUSE, VK_VOLUME_UP
 from deskpilot_backend.commands import HELP_MESSAGE
-from deskpilot_backend.main import app, get_process_launcher, get_speech_engine_factory
+from deskpilot_backend.main import (
+    app,
+    get_key_event_sender,
+    get_process_launcher,
+    get_speech_engine_factory,
+)
 
 
 class RecordingLauncher:
@@ -14,6 +20,15 @@ class RecordingLauncher:
 
     def __call__(self, command: list[str]) -> object:
         self.commands.append(command)
+        return object()
+
+
+class RecordingKeyEventSender:
+    def __init__(self) -> None:
+        self.events: list[tuple[int, int]] = []
+
+    def __call__(self, virtual_key: int, flags: int) -> object:
+        self.events.append((virtual_key, flags))
         return object()
 
 
@@ -32,10 +47,14 @@ class FakeSpeechEngine:
 @contextmanager
 def mocked_dependencies(
     launcher: RecordingLauncher | None = None,
+    key_event_sender: RecordingKeyEventSender | None = None,
     speech_engine_factory: object | None = None,
 ) -> Iterator[None]:
     if launcher is not None:
         app.dependency_overrides[get_process_launcher] = lambda: launcher
+
+    if key_event_sender is not None:
+        app.dependency_overrides[get_key_event_sender] = lambda: key_event_sender
 
     if speech_engine_factory is not None:
         app.dependency_overrides[get_speech_engine_factory] = (
@@ -190,6 +209,44 @@ def test_assistant_information_commands_do_not_call_executor(
     assert response.json()["intent"] == intent
     assert response.json()["status"] == "completed"
     assert launcher.commands == []
+
+
+@pytest.mark.parametrize(
+    ("text", "target", "virtual_key", "expected_message"),
+    [
+        ("volume up", "volume_up", VK_VOLUME_UP, "Turning volume up."),
+        ("turn volume up", "volume_up", VK_VOLUME_UP, "Turning volume up."),
+        ("play music", "play_pause", VK_MEDIA_PLAY_PAUSE, "Toggling media playback."),
+        ("pause music", "play_pause", VK_MEDIA_PLAY_PAUSE, "Toggling media playback."),
+    ],
+)
+def test_assistant_media_commands_route_and_send_fixed_key_events(
+    text: str,
+    target: str,
+    virtual_key: int,
+    expected_message: str,
+) -> None:
+    launcher = RecordingLauncher()
+    key_event_sender = RecordingKeyEventSender()
+    client = TestClient(app)
+
+    with mocked_dependencies(launcher=launcher, key_event_sender=key_event_sender):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": text},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "media_control",
+        "status": "executed",
+        "requires_confirmation": False,
+        "message": expected_message,
+        "speech_result": "not_requested",
+        "action": {"type": "media_key", "target": target},
+    }
+    assert launcher.commands == []
+    assert key_event_sender.events == [(virtual_key, 0), (virtual_key, KEYEVENTF_KEYUP)]
 
 
 def test_assistant_blank_input_is_rejected() -> None:

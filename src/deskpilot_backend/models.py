@@ -15,12 +15,31 @@ class CommandRequest(BaseModel):
 
 
 class CommandAction(BaseModel):
-    type: Literal["open_app"]
-    target: Literal["calculator", "notepad", "file_explorer", "settings", "browser"]
+    type: Literal["open_app", "media_key"]
+    target: Literal[
+        "calculator",
+        "notepad",
+        "file_explorer",
+        "settings",
+        "browser",
+        "volume_up",
+        "volume_down",
+        "mute",
+        "play_pause",
+        "next_track",
+        "previous_track",
+    ]
 
 
 class CommandResponse(BaseModel):
-    intent: Literal["open_app", "get_time", "get_date", "help", "unknown"]
+    intent: Literal[
+        "open_app",
+        "media_control",
+        "get_time",
+        "get_date",
+        "help",
+        "unknown",
+    ]
     status: Literal["planned", "completed", "not_supported"]
     requires_confirmation: bool
     message: str
@@ -40,7 +59,14 @@ class ActionExecutionResponse(BaseModel):
 
 
 class AssistantCommandResponse(BaseModel):
-    intent: Literal["open_app", "get_time", "get_date", "help", "unknown"]
+    intent: Literal[
+        "open_app",
+        "media_control",
+        "get_time",
+        "get_date",
+        "help",
+        "unknown",
+    ]
     status: Literal["executed", "completed", "not_supported"]
     requires_confirmation: bool
     message: str
