@@ -86,6 +86,14 @@ Notes commands:
 - `how many notes do I have`
 - `open notes folder`
 
+Reminder commands:
+
+- `remind me in one minute to stretch`
+- `remind me in 10 minutes to stretch`
+- `remind me in twenty five minutes to stretch`
+- `list reminders`
+- `what are my reminders`
+
 Workspace shortcuts:
 
 - `open downloads`
@@ -129,6 +137,7 @@ Media controls use fixed Windows virtual media keys and affect the active Window
 Workspace shortcuts use fixed Windows targets only. Folder shortcuts are derived from known local user directories; DeskPilot never accepts spoken paths. System status commands are read-only and use standard-library or Windows `ctypes` calls.
 Fixed-site commands use exact allowlisted HTTPS URLs. Search commands encode the query into the trusted search site's `q` parameter and open the results in the default browser; DeskPilot does not make direct HTTP requests.
 Notes are saved as plain-text UTF-8 `.txt` files under `~/Documents/DeskPilot/notes`. DeskPilot never accepts spoken note paths or filenames, never overwrites an existing note, and does not sync or send note content anywhere.
+Reminders accept digit minutes or deterministic English number words up to 1440 minutes, such as `a minute`, `one minute`, and `twenty five minutes`. They are saved locally in `~/Documents/DeskPilot/reminders.json`, reloaded on startup, and scheduled from their saved due times. When a reminder is due, DeskPilot shows a native tray notification and says `Reminder: <text>` with local TTS. Reminder content stays local and is not synced or sent anywhere.
 
 ## Manual Speech Check
 

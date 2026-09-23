@@ -21,10 +21,12 @@ from deskpilot_backend.main import (
     get_key_event_sender,
     get_note_store,
     get_process_launcher,
+    get_reminder_service,
     get_system_status_reader,
 )
 from deskpilot_backend.models import ActionExecutionRequest
 from deskpilot_backend.notes import NoteStore, format_latest_note, format_note_count
+from deskpilot_backend.reminders import ReminderService
 
 
 class RecordingLauncher:
@@ -53,6 +55,26 @@ class RecordingSystemStatusReader:
     def __call__(self, target: str) -> str:
         self.targets.append(target)
         return self.messages[target]
+
+
+class FakeTimer:
+    def __init__(self, delay_seconds, callback) -> None:
+        self.delay_seconds = delay_seconds
+        self.callback = callback
+        self.cancelled = False
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
+class FakeTimerFactory:
+    def __init__(self) -> None:
+        self.timers: list[FakeTimer] = []
+
+    def __call__(self, delay_seconds, callback) -> FakeTimer:
+        timer = FakeTimer(delay_seconds, callback)
+        self.timers.append(timer)
+        return timer
 
 
 @pytest.mark.parametrize(
@@ -400,6 +422,82 @@ def test_note_formatters_keep_latest_note_reasonably_short() -> None:
     assert format_note_count(2) == "You have 2 notes."
 
 
+def test_reminder_create_action_persists_and_schedules_temp_reminder(tmp_path) -> None:
+    timers = FakeTimerFactory()
+    reminder_service = ReminderService(
+        tmp_path / "reminders.json",
+        timer_factory=timers,
+    )
+    action = ActionExecutionRequest(
+        type="reminder",
+        target="create",
+        minutes=5,
+        query="Stretch.",
+    )
+
+    response = execute_action(action, reminder_service=reminder_service)
+
+    assert response.executed is True
+    assert response.message == "Reminder set for 5 minutes from now."
+    assert len(reminder_service.list_pending_reminders()) == 1
+    assert reminder_service.list_pending_reminders()[0].text == "Stretch."
+    assert len(timers.timers) == 1
+
+
+def test_reminder_list_action_reports_pending_reminders(tmp_path) -> None:
+    timers = FakeTimerFactory()
+    reminder_service = ReminderService(
+        tmp_path / "reminders.json",
+        timer_factory=timers,
+    )
+    reminder_service.create_reminder(1, "Soon.")
+
+    response = execute_action(
+        ActionExecutionRequest(type="reminder", target="list"),
+        reminder_service=reminder_service,
+    )
+
+    assert response.message == "Pending reminders: in 1 minute, Soon.."
+
+
+@pytest.mark.parametrize(
+    ("minutes", "query", "message"),
+    [
+        (None, "Stretch.", "Reminder minutes must be between 1 and 1440."),
+        (0, "Stretch.", "Reminder minutes must be between 1 and 1440."),
+        (1441, "Stretch.", "Reminder minutes must be between 1 and 1440."),
+        (5, "", "Reminder text must not be empty."),
+        (5, "line\nbreak", "Reminder text contains unsupported control characters."),
+        (5, "a" * 501, "Reminder text is too long."),
+    ],
+)
+def test_invalid_reminder_action_is_rejected_without_scheduling(
+    tmp_path,
+    minutes: int | None,
+    query: str,
+    message: str,
+) -> None:
+    timers = FakeTimerFactory()
+    reminder_service = ReminderService(
+        tmp_path / "reminders.json",
+        timer_factory=timers,
+    )
+
+    with pytest.raises(UnsupportedActionError, match=message):
+        execute_action(
+            ActionExecutionRequest(
+                type="reminder",
+                target="create",
+                minutes=minutes,
+                query=query,
+            ),
+            reminder_service=reminder_service,
+        )
+
+    assert reminder_service.list_pending_reminders() == []
+    assert timers.timers == []
+
+
 def test_media_key_rejects_unsupported_platform_without_succeeding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -513,6 +611,21 @@ def test_unsupported_note_target_is_rejected_and_never_writes_file(tmp_path) -> 
         execute_action(action, note_store=note_store)
 
     assert note_store.count_notes() == 0
+
+
+def test_unsupported_reminder_target_is_rejected_and_never_schedules(tmp_path) -> None:
+    timers = FakeTimerFactory()
+    reminder_service = ReminderService(
+        tmp_path / "reminders.json",
+        timer_factory=timers,
+    )
+    action = ActionExecutionRequest(type="reminder", target="delete")
+
+    with pytest.raises(UnsupportedActionError, match="Unsupported action target"):
+        execute_action(action, reminder_service=reminder_service)
+
+    assert reminder_service.list_pending_reminders() == []
+    assert timers.timers == []
 
 
 @pytest.mark.parametrize(
@@ -639,3 +752,29 @@ def test_actions_execute_endpoint_uses_temp_note_store(tmp_path) -> None:
     assert response.status_code == 200
     assert response.json()["message"] == "Note saved."
     assert note_store.count_notes() == 1
+
+
+def test_actions_execute_endpoint_uses_temp_reminder_service(tmp_path) -> None:
+    reminder_service = ReminderService(
+        tmp_path / "reminders.json",
+        timer_factory=FakeTimerFactory(),
+    )
+    client = TestClient(app)
+    app.dependency_overrides[get_reminder_service] = lambda: reminder_service
+
+    try:
+        response = client.post(
+            "/api/v1/actions/execute",
+            json={
+                "type": "reminder",
+                "target": "create",
+                "minutes": 5,
+                "query": "Stretch.",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Reminder set for 5 minutes from now."
+    assert len(reminder_service.list_pending_reminders()) == 1

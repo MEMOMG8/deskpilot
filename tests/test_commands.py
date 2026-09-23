@@ -400,6 +400,131 @@ def test_unknown_note_like_command_is_not_supported() -> None:
     assert response.status == "not_supported"
 
 
+@pytest.mark.parametrize(
+    ("text", "minutes", "reminder_text"),
+    [
+        ("remind me in 1 minute to stretch", 1, "stretch"),
+        ("remind me in 5 minutes to stretch", 5, "stretch"),
+        ("remind me in a minute to stretch", 1, "stretch"),
+        ("remind me in one minute to stretch", 1, "stretch"),
+        ("remind me in twenty five minutes to stretch", 25, "stretch"),
+        (
+            "remind me in one thousand four hundred forty minutes to Stretch",
+            1440,
+            "Stretch",
+        ),
+    ],
+)
+def test_reminder_create_commands_are_recognized(
+    text: str,
+    minutes: int,
+    reminder_text: str,
+) -> None:
+    response = route_command(text)
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "reminders",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {
+            "type": "reminder",
+            "target": "create",
+            "query": reminder_text,
+            "minutes": minutes,
+        },
+        "message": "Reminder was recognized, but DeskPilot will not schedule it yet.",
+    }
+
+
+@pytest.mark.parametrize(
+    ("text", "target"),
+    [
+        ("list reminders", "list"),
+        ("what are my reminders", "list"),
+    ],
+)
+def test_reminder_list_commands_are_recognized(text: str, target: str) -> None:
+    response = route_command(text)
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "reminders",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "reminder", "target": target},
+        "message": (
+            "Reminder command was recognized, "
+            "but DeskPilot will not run it yet."
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        (
+            "remind me in twenty banana minutes to stretch",
+            "Use: remind me in <N> minutes to <text>.",
+        ),
+        (
+            "remind me in negative one minutes to stretch",
+            "Use: remind me in <N> minutes to <text>.",
+        ),
+        (
+            "remind me in zero minutes to stretch",
+            "Reminder minutes must be between 1 and 1440.",
+        ),
+        (
+            "remind me in 0 minutes to stretch",
+            "Reminder minutes must be between 1 and 1440.",
+        ),
+        (
+            "remind me in 1441 minutes to stretch",
+            "Reminder minutes must be between 1 and 1440.",
+        ),
+        (
+            "remind me in one thousand four hundred forty one minutes to stretch",
+            "Reminder minutes must be between 1 and 1440.",
+        ),
+        (
+            "remind me in 5 minutes to",
+            "Reminder text must not be empty.",
+        ),
+        (
+            "remind me in 5 minutes to line\nbreak",
+            "Reminder text contains unsupported control characters.",
+        ),
+        (
+            f"remind me in 5 minutes to {'a' * 501}",
+            "Reminder text is too long.",
+        ),
+    ],
+)
+def test_invalid_reminder_commands_are_rejected(text: str, message: str) -> None:
+    with pytest.raises(CommandValidationError, match=re.escape(message)):
+        route_command(text)
+
+
+def test_commands_endpoint_rejects_invalid_reminder() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/commands",
+        json={"text": "remind me in 0 minutes to stretch"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Reminder minutes must be between 1 and 1440."
+    }
+
+
+def test_unknown_reminder_like_command_is_not_supported() -> None:
+    response = route_command("delete reminders")
+
+    assert response.intent == "unknown"
+    assert response.status == "not_supported"
+
+
 def test_commands_endpoint_rejects_blank_text() -> None:
     client = TestClient(app)
 

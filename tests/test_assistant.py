@@ -11,10 +11,12 @@ from deskpilot_backend.main import (
     get_key_event_sender,
     get_note_store,
     get_process_launcher,
+    get_reminder_service,
     get_speech_engine_factory,
     get_system_status_reader,
 )
 from deskpilot_backend.notes import NoteStore
+from deskpilot_backend.reminders import ReminderService
 
 
 class RecordingLauncher:
@@ -45,6 +47,25 @@ class RecordingSystemStatusReader:
         return self.messages[target]
 
 
+class FakeTimer:
+    def __init__(self, delay_seconds, callback) -> None:
+        self.delay_seconds = delay_seconds
+        self.callback = callback
+
+    def cancel(self) -> None:
+        return None
+
+
+class FakeTimerFactory:
+    def __init__(self) -> None:
+        self.timers: list[FakeTimer] = []
+
+    def __call__(self, delay_seconds, callback) -> FakeTimer:
+        timer = FakeTimer(delay_seconds, callback)
+        self.timers.append(timer)
+        return timer
+
+
 class FakeSpeechEngine:
     def __init__(self) -> None:
         self.spoken_text: list[str] = []
@@ -63,6 +84,7 @@ def mocked_dependencies(
     key_event_sender: RecordingKeyEventSender | None = None,
     system_status_reader: RecordingSystemStatusReader | None = None,
     note_store: NoteStore | None = None,
+    reminder_service: ReminderService | None = None,
     speech_engine_factory: object | None = None,
 ) -> Iterator[None]:
     if launcher is not None:
@@ -78,6 +100,9 @@ def mocked_dependencies(
 
     if note_store is not None:
         app.dependency_overrides[get_note_store] = lambda: note_store
+
+    if reminder_service is not None:
+        app.dependency_overrides[get_reminder_service] = lambda: reminder_service
 
     if speech_engine_factory is not None:
         app.dependency_overrides[get_speech_engine_factory] = (
@@ -568,6 +593,94 @@ def test_assistant_rejects_invalid_note_text() -> None:
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Note text must not be empty."}
+
+
+def test_assistant_reminder_create_schedules_with_temp_service(tmp_path) -> None:
+    timers = FakeTimerFactory()
+    reminder_service = ReminderService(
+        tmp_path / "reminders.json",
+        timer_factory=timers,
+    )
+    client = TestClient(app)
+
+    with mocked_dependencies(reminder_service=reminder_service):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "remind me in 5 minutes to Stretch"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "reminders",
+        "status": "executed",
+        "requires_confirmation": False,
+        "message": "Reminder set for 5 minutes from now.",
+        "speech_result": "not_requested",
+        "action": {
+            "type": "reminder",
+            "target": "create",
+            "query": "Stretch",
+            "minutes": 5,
+        },
+    }
+    assert len(reminder_service.list_pending_reminders()) == 1
+    assert len(timers.timers) == 1
+
+
+def test_assistant_reminder_list_reports_pending_reminders(tmp_path) -> None:
+    reminder_service = ReminderService(
+        tmp_path / "reminders.json",
+        timer_factory=FakeTimerFactory(),
+    )
+    reminder_service.create_reminder(1, "Soon.")
+    client = TestClient(app)
+
+    with mocked_dependencies(reminder_service=reminder_service):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "list reminders"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["intent"] == "reminders"
+    assert response.json()["message"] == "Pending reminders: in 1 minute, Soon.."
+
+
+def test_assistant_reminder_with_speak_narrates_confirmation(tmp_path) -> None:
+    reminder_service = ReminderService(
+        tmp_path / "reminders.json",
+        timer_factory=FakeTimerFactory(),
+    )
+    engine = FakeSpeechEngine()
+    client = TestClient(app)
+
+    with mocked_dependencies(
+        reminder_service=reminder_service,
+        speech_engine_factory=lambda: engine,
+    ):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "remind me in 1 minutes to Stretch", "speak": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Reminder set for 1 minute from now."
+    assert response.json()["speech_result"] == "completed"
+    assert engine.spoken_text == ["Reminder set for 1 minute from now."]
+
+
+def test_assistant_rejects_invalid_reminder() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/assistant/commands",
+        json={"text": "remind me in 0 minutes to Stretch"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Reminder minutes must be between 1 and 1440."
+    }
 
 
 def test_assistant_blank_input_is_rejected() -> None:

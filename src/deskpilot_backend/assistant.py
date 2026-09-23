@@ -11,6 +11,7 @@ from deskpilot_backend.models import (
     AssistantCommandResponse,
 )
 from deskpilot_backend.notes import NoteStore
+from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
 
 
@@ -20,6 +21,7 @@ def handle_assistant_command(
     key_event_sender: KeyEventSender | None = None,
     system_status_reader: SystemStatusReader | None = None,
     note_store: NoteStore | None = None,
+    reminder_service: ReminderService | None = None,
     speech_engine_factory: SpeechEngineFactory | None = None,
 ) -> AssistantCommandResponse:
     routed_command = route_command(command.text)
@@ -38,11 +40,13 @@ def handle_assistant_command(
             type=routed_command.action.type,
             target=routed_command.action.target,
             query=routed_command.action.query,
+            minutes=routed_command.action.minutes,
         ),
         launcher=launcher,
         key_event_sender=key_event_sender,
         system_status_reader=system_status_reader,
         note_store=note_store,
+        reminder_service=reminder_service,
     )
 
     response = AssistantCommandResponse(

@@ -7,10 +7,12 @@ from deskpilot_backend.actions import (
     SystemStatusReader,
     UnsupportedActionError,
 )
+from deskpilot_backend.commands import CommandValidationError
 from deskpilot_backend.microphone import AudioRecorder, MicrophoneError, record_microphone_wav
 from deskpilot_backend.models import VoiceCommandResponse
 from deskpilot_backend.notes import NoteStore
-from deskpilot_backend.speech import SpeechEngineFactory
+from deskpilot_backend.reminders import ReminderService
+from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
 from deskpilot_backend.transcription import (
     EmptyAudioError,
     TranscriptionServiceError,
@@ -22,6 +24,7 @@ from deskpilot_backend.voice import handle_voice_command
 NATIVE_COMMAND_DURATION_SECONDS = 4
 NATIVE_COMMAND_CONTENT_TYPE = "audio/wav"
 NATIVE_COMMAND_FILENAME = "native-microphone.wav"
+NATIVE_REMINDER_HINT = "Say: remind me in one minute to stretch."
 
 
 class NativeVoiceCommandError(RuntimeError):
@@ -38,6 +41,7 @@ class NativeVoiceCommandService:
     key_event_sender: KeyEventSender | None = None
     system_status_reader: SystemStatusReader | None = None
     note_store: NoteStore | None = None
+    reminder_service: ReminderService | None = None
     speech_engine_factory: SpeechEngineFactory | None = None
 
     def run(self) -> VoiceCommandResponse:
@@ -53,8 +57,13 @@ class NativeVoiceCommandService:
                 key_event_sender=self.key_event_sender,
                 system_status_reader=self.system_status_reader,
                 note_store=self.note_store,
+                reminder_service=self.reminder_service,
                 speech_engine_factory=self.speech_engine_factory,
             )
+        except CommandValidationError as error:
+            message = _native_validation_message(error)
+            _try_speak_native_validation_message(message, self.speech_engine_factory)
+            raise NativeVoiceCommandError(message) from error
         except (
             MicrophoneError,
             EmptyAudioError,
@@ -63,6 +72,24 @@ class NativeVoiceCommandService:
             UnsupportedActionError,
         ) as error:
             raise NativeVoiceCommandError(str(error)) from error
+
+
+def _native_validation_message(error: CommandValidationError) -> str:
+    message = str(error)
+    if "reminder" in message.casefold() or "remind me" in message.casefold():
+        return NATIVE_REMINDER_HINT
+
+    return message
+
+
+def _try_speak_native_validation_message(
+    message: str,
+    speech_engine_factory: SpeechEngineFactory | None,
+) -> None:
+    try:
+        speak_text(message, engine_factory=speech_engine_factory)
+    except SpeechEngineError:
+        return
 
 
 def run_native_voice_handoff(

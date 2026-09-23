@@ -28,6 +28,7 @@ from deskpilot_backend.models import (
     VoiceCommandResponse,
 )
 from deskpilot_backend.notes import NoteStore
+from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.microphone import (
     AudioRecorder,
     MicrophoneError,
@@ -44,6 +45,7 @@ from deskpilot_backend.voice import handle_voice_command
 
 app = FastAPI(title="DeskPilot")
 transcription_service = WhisperTranscriptionService()
+reminder_service = ReminderService()
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -63,6 +65,10 @@ def get_system_status_reader() -> SystemStatusReader | None:
 
 def get_note_store() -> NoteStore | None:
     return None
+
+
+def get_reminder_service() -> ReminderService:
+    return reminder_service
 
 
 def get_speech_engine_factory() -> SpeechEngineFactory | None:
@@ -106,6 +112,7 @@ def execute_planned_action(
     key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     system_status_reader: SystemStatusReader | None = Depends(get_system_status_reader),
     note_store: NoteStore | None = Depends(get_note_store),
+    reminders: ReminderService = Depends(get_reminder_service),
 ) -> ActionExecutionResponse:
     try:
         return execute_action(
@@ -114,6 +121,7 @@ def execute_planned_action(
             key_event_sender=key_event_sender,
             system_status_reader=system_status_reader,
             note_store=note_store,
+            reminder_service=reminders,
         )
     except UnsupportedActionError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -130,6 +138,7 @@ def create_assistant_command(
     key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     system_status_reader: SystemStatusReader | None = Depends(get_system_status_reader),
     note_store: NoteStore | None = Depends(get_note_store),
+    reminders: ReminderService = Depends(get_reminder_service),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -141,6 +150,7 @@ def create_assistant_command(
             key_event_sender=key_event_sender,
             system_status_reader=system_status_reader,
             note_store=note_store,
+            reminder_service=reminders,
             speech_engine_factory=speech_engine_factory,
         )
     except CommandValidationError as error:
@@ -194,6 +204,7 @@ async def create_voice_command(
     key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     system_status_reader: SystemStatusReader | None = Depends(get_system_status_reader),
     note_store: NoteStore | None = Depends(get_note_store),
+    reminders: ReminderService = Depends(get_reminder_service),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -211,6 +222,7 @@ async def create_voice_command(
             key_event_sender=key_event_sender,
             system_status_reader=system_status_reader,
             note_store=note_store,
+            reminder_service=reminders,
             speech_engine_factory=speech_engine_factory,
         )
     except EmptyAudioError as error:
@@ -238,6 +250,7 @@ def create_microphone_command(
     key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     system_status_reader: SystemStatusReader | None = Depends(get_system_status_reader),
     note_store: NoteStore | None = Depends(get_note_store),
+    reminders: ReminderService = Depends(get_reminder_service),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -254,6 +267,7 @@ def create_microphone_command(
             key_event_sender=key_event_sender,
             system_status_reader=system_status_reader,
             note_store=note_store,
+            reminder_service=reminders,
             speech_engine_factory=speech_engine_factory,
         )
     except MicrophoneError as error:

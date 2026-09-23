@@ -16,6 +16,11 @@ from deskpilot_backend.notes import (
     format_latest_note,
     format_note_count,
 )
+from deskpilot_backend.reminders import (
+    MAX_REMINDER_TEXT_LENGTH,
+    ReminderService,
+    ReminderStoreError,
+)
 
 OPEN_APP_ACTION_TYPE = "open_app"
 MEDIA_KEY_ACTION_TYPE = "media_key"
@@ -24,6 +29,7 @@ SYSTEM_STATUS_ACTION_TYPE = "system_status"
 OPEN_URL_ACTION_TYPE = "open_url"
 WEB_SEARCH_ACTION_TYPE = "web_search"
 NOTE_ACTION_TYPE = "note"
+REMINDER_ACTION_TYPE = "reminder"
 MAX_SEARCH_QUERY_LENGTH = 120
 KEYEVENTF_KEYUP = 0x0002
 VK_VOLUME_MUTE = 0xAD
@@ -50,6 +56,7 @@ class ActionDefinition:
     search_url: str | None = None
     query_message_prefix: str | None = None
     note_operation: str | None = None
+    reminder_operation: str | None = None
     unsupported_platform_message: str | None = None
 
 
@@ -211,6 +218,16 @@ ACTION_REGISTRY = {
         message="Opening notes folder.",
         unsupported_platform_message="Notes folder opening is only supported on Windows.",
     ),
+    (REMINDER_ACTION_TYPE, "create"): ActionDefinition(
+        action_type=REMINDER_ACTION_TYPE,
+        reminder_operation="create",
+        message="Reminder set.",
+    ),
+    (REMINDER_ACTION_TYPE, "list"): ActionDefinition(
+        action_type=REMINDER_ACTION_TYPE,
+        reminder_operation="list",
+        message="Listing reminders.",
+    ),
 }
 SUPPORTED_ACTION_TYPES = {action_type for action_type, _target in ACTION_REGISTRY}
 
@@ -225,6 +242,7 @@ def execute_action(
     key_event_sender: KeyEventSender | None = None,
     system_status_reader: SystemStatusReader | None = None,
     note_store: NoteStore | None = None,
+    reminder_service: ReminderService | None = None,
 ) -> ActionExecutionResponse:
     if action.type not in SUPPORTED_ACTION_TYPES:
         raise UnsupportedActionError(f"Unsupported action type: {action.type}")
@@ -268,6 +286,12 @@ def execute_action(
             note_store=note_store,
             launcher=launcher,
         )
+    elif action_definition.reminder_operation is not None:
+        message = execute_reminder_operation(
+            action_definition.reminder_operation,
+            action,
+            reminder_service=reminder_service,
+        )
 
     return ActionExecutionResponse(
         status="executed",
@@ -275,6 +299,62 @@ def execute_action(
         action=action,
         message=message,
     )
+
+
+def execute_reminder_operation(
+    operation: str,
+    action: ActionExecutionRequest,
+    *,
+    reminder_service: ReminderService | None = None,
+) -> str:
+    service = reminder_service or ReminderService()
+
+    try:
+        if operation == "create":
+            minutes = validate_reminder_minutes(action.minutes)
+            reminder_text = validate_reminder_text(action.query)
+            service.create_reminder(minutes, reminder_text)
+            return _format_reminder_created(minutes)
+
+        if operation == "list":
+            return service.format_pending_reminders()
+    except ReminderStoreError as error:
+        raise UnsupportedActionError(str(error)) from error
+
+    raise UnsupportedActionError(f"Unsupported reminder operation: {operation}")
+
+
+def validate_reminder_minutes(minutes: int | None) -> int:
+    if minutes is None:
+        raise UnsupportedActionError("Reminder minutes must be between 1 and 1440.")
+
+    if minutes < 1 or minutes > 1440:
+        raise UnsupportedActionError("Reminder minutes must be between 1 and 1440.")
+
+    return minutes
+
+
+def validate_reminder_text(reminder_text: str | None) -> str:
+    if reminder_text is None or not reminder_text.strip():
+        raise UnsupportedActionError("Reminder text must not be empty.")
+
+    normalized_text = " ".join(reminder_text.split())
+    if len(normalized_text) > MAX_REMINDER_TEXT_LENGTH:
+        raise UnsupportedActionError("Reminder text is too long.")
+
+    if any(_is_control_character(character) for character in reminder_text):
+        raise UnsupportedActionError(
+            "Reminder text contains unsupported control characters."
+        )
+
+    return normalized_text
+
+
+def _format_reminder_created(minutes: int) -> str:
+    if minutes == 1:
+        return "Reminder set for 1 minute from now."
+
+    return f"Reminder set for {minutes} minutes from now."
 
 
 def execute_note_operation(

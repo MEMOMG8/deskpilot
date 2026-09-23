@@ -4,6 +4,7 @@ from deskpilot_backend.actions import KEYEVENTF_KEYUP, VK_MEDIA_PLAY_PAUSE
 from deskpilot_backend.desktop_state import NativeWakeWordCommandController
 from deskpilot_backend.desktop_voice import (
     NATIVE_COMMAND_DURATION_SECONDS,
+    NATIVE_REMINDER_HINT,
     NativeVoiceCommandError,
     NativeVoiceCommandService,
     run_native_voice_handoff,
@@ -136,6 +137,29 @@ def test_native_voice_command_can_execute_mocked_media_key_command() -> None:
         (VK_MEDIA_PLAY_PAUSE, KEYEVENTF_KEYUP),
     ]
     assert engine.spoken_text == ["Toggling media playback."]
+
+
+def test_native_voice_reminder_validation_error_is_narrated_helpfully() -> None:
+    wav_audio = encode_wav(b"\x00\x00" * 16000)
+    recorder = FakeRecorder(wav_audio)
+    launcher = RecordingLauncher()
+    engine = FakeSpeechEngine()
+    service = NativeVoiceCommandService(
+        transcription_service=FakeTranscriptionService(
+            "remind me in banana minutes to stretch"
+        ),
+        recorder=recorder,
+        launcher=launcher,
+        speech_engine_factory=lambda: engine,
+    )
+
+    with pytest.raises(NativeVoiceCommandError) as error:
+        service.run()
+
+    assert str(error.value) == NATIVE_REMINDER_HINT
+    assert launcher.commands == []
+    assert engine.spoken_text == [NATIVE_REMINDER_HINT]
+    assert engine.completed is True
 
 
 def test_native_voice_command_failure_is_controlled() -> None:

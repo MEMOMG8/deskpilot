@@ -23,6 +23,7 @@ class CommandAction(BaseModel):
         "open_url",
         "web_search",
         "note",
+        "reminder",
     ]
     target: Literal[
         "calculator",
@@ -51,8 +52,10 @@ class CommandAction(BaseModel):
         "read_latest",
         "count",
         "open_folder",
+        "list",
     ]
     query: str | None = None
+    minutes: int | None = None
 
 
 class CommandResponse(BaseModel):
@@ -64,6 +67,7 @@ class CommandResponse(BaseModel):
         "open_site",
         "web_search",
         "notes",
+        "reminders",
         "get_time",
         "get_date",
         "help",
@@ -79,6 +83,7 @@ class ActionExecutionRequest(BaseModel):
     type: str
     target: str
     query: str | None = None
+    minutes: int | None = None
 
 
 class ActionExecutionResponse(BaseModel):
@@ -97,6 +102,7 @@ class AssistantCommandResponse(BaseModel):
         "open_site",
         "web_search",
         "notes",
+        "reminders",
         "get_time",
         "get_date",
         "help",

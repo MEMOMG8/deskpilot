@@ -11,6 +11,7 @@ from deskpilot_backend.desktop_voice import (
     NativeVoiceCommandService,
     run_native_voice_handoff,
 )
+from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.wake_word import WakeWordError, WakeWordService
 
 LOGGER = logging.getLogger(__name__)
@@ -92,6 +93,7 @@ def main() -> int:
         wake_word_error = Signal(str)
         native_command_completed = Signal(object)
         native_command_failed = Signal(str)
+        reminder_due = Signal(str)
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
@@ -110,7 +112,6 @@ def main() -> int:
         on_detected=signals.wake_word_detected.emit,
         on_error=signals.wake_word_error.emit,
     )
-    native_voice_service = NativeVoiceCommandService()
     wake_word_lock = threading.Lock()
     icon = app.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
 
@@ -234,12 +235,22 @@ def main() -> int:
         finish_native_command()
         tray.showMessage("DeskPilot", message)
 
+    def on_reminder_due(message: str) -> None:
+        tray.showMessage("DeskPilot", message)
+
     def quit_deskpilot() -> None:
         native_command_state.disable_wake_word()
         stop_wake_word_service()
+        reminder_service.stop()
         overlay.hide()
         tray.hide()
         app.quit()
+
+    signals.reminder_due.connect(on_reminder_due)
+    reminder_service = ReminderService(notifier=signals.reminder_due.emit)
+    native_voice_service = NativeVoiceCommandService(
+        reminder_service=reminder_service,
+    )
 
     show_action.triggered.connect(show_border)
     hide_action.triggered.connect(hide_border)

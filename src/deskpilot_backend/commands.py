@@ -5,6 +5,7 @@ from datetime import datetime
 
 from deskpilot_backend.models import CommandAction, CommandResponse
 from deskpilot_backend.notes import MAX_NOTE_TEXT_LENGTH
+from deskpilot_backend.reminders import MAX_REMINDER_TEXT_LENGTH
 
 TERMINAL_PUNCTUATION = ".,!?"
 MAX_SEARCH_QUERY_LENGTH = 120
@@ -21,7 +22,9 @@ HELP_MESSAGE = (
     "what is my battery level; memory status; how much memory am I using; "
     "disk space; how much disk space do I have; take a note remember this; "
     "note remember this; read latest note; how many notes do I have; "
-    "open notes folder; help; what can you do."
+    "open notes folder; remind me in one minute to stretch; "
+    "remind me in 10 minutes to stretch; list reminders; "
+    "what are my reminders; help; what can you do."
 )
 
 
@@ -94,6 +97,50 @@ NOTE_COMMANDS = {
     "open notes folder": "open_folder",
 }
 NOTE_COMMAND_PREFIXES = ("take a note", "note")
+REMINDER_COMMANDS = {"list reminders", "what are my reminders"}
+REMINDER_COMMAND_PATTERN = re.compile(
+    r"^remind\s+me\s+in\s+(.+?)\s+minutes?\s+to(?:\s+|$)",
+    re.IGNORECASE,
+)
+REMINDER_USAGE_MESSAGE = "Use: remind me in <N> minutes to <text>."
+MIN_REMINDER_MINUTES = 1
+MAX_REMINDER_MINUTES = 1440
+
+NUMBER_UNITS = {
+    "zero": 0,
+    "a": 1,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+}
+NUMBER_TEENS = {
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+}
+NUMBER_TENS = {
+    "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "seventy": 70,
+    "eighty": 80,
+    "ninety": 90,
+}
 
 TIME_COMMANDS = {"what time is it", "what's the time"}
 DATE_COMMANDS = {"what is the date", "what's today's date"}
@@ -118,6 +165,10 @@ def route_command(
     note_response = _route_note_command(text)
     if note_response is not None:
         return note_response
+
+    reminder_response = _route_reminder_command(text)
+    if reminder_response is not None:
+        return reminder_response
 
     normalized_text = normalize_command_text(text)
 
@@ -198,6 +249,18 @@ def route_command(
             message="Notes command was recognized, but DeskPilot will not run it yet.",
         )
 
+    if normalized_text in REMINDER_COMMANDS:
+        return CommandResponse(
+            intent="reminders",
+            status="planned",
+            requires_confirmation=False,
+            action=CommandAction(type="reminder", target="list"),
+            message=(
+                "Reminder command was recognized, "
+                "but DeskPilot will not run it yet."
+            ),
+        )
+
     if normalized_text in TIME_COMMANDS:
         return CommandResponse(
             intent="get_time",
@@ -228,6 +291,156 @@ def route_command(
         requires_confirmation=False,
         message="That command is not supported yet.",
     )
+
+
+def _route_reminder_command(text: str) -> CommandResponse | None:
+    stripped_text = text.strip()
+
+    if re.match(r"^remind\s+me\s+in\s+", stripped_text, re.IGNORECASE):
+        match = REMINDER_COMMAND_PATTERN.match(stripped_text)
+        if match is None:
+            raise CommandValidationError(REMINDER_USAGE_MESSAGE)
+
+        minutes = _parse_reminder_minutes(match.group(1))
+        raw_reminder_text = stripped_text[match.end() :]
+        reminder_text = _normalize_note_text(raw_reminder_text)
+        _validate_reminder_text(raw_reminder_text, reminder_text)
+        return CommandResponse(
+            intent="reminders",
+            status="planned",
+            requires_confirmation=False,
+            action=CommandAction(
+                type="reminder",
+                target="create",
+                query=reminder_text,
+                minutes=minutes,
+            ),
+            message="Reminder was recognized, but DeskPilot will not schedule it yet.",
+        )
+
+    return None
+
+
+def _parse_reminder_minutes(value: str) -> int:
+    normalized_value = re.sub(r"\s+", " ", value.strip().casefold())
+    if not normalized_value:
+        raise CommandValidationError(REMINDER_USAGE_MESSAGE)
+
+    if normalized_value.isdecimal():
+        minutes = int(normalized_value)
+    else:
+        minutes = _parse_english_number(normalized_value)
+        if minutes is None:
+            raise CommandValidationError(REMINDER_USAGE_MESSAGE)
+
+    if minutes < MIN_REMINDER_MINUTES or minutes > MAX_REMINDER_MINUTES:
+        raise CommandValidationError("Reminder minutes must be between 1 and 1440.")
+
+    return minutes
+
+
+def _parse_english_number(value: str) -> int | None:
+    words = value.split()
+    if not words or words.count("thousand") > 1:
+        return None
+
+    if "thousand" not in words:
+        return _parse_under_thousand(words)
+
+    thousand_index = words.index("thousand")
+    multiplier_words = words[:thousand_index]
+    remainder_words = words[thousand_index + 1 :]
+    multiplier = _parse_single_digit(multiplier_words)
+    if multiplier is None or multiplier == 0:
+        return None
+
+    if not remainder_words:
+        return multiplier * 1000
+
+    remainder = _parse_under_thousand(remainder_words)
+    if remainder is None:
+        return None
+
+    return multiplier * 1000 + remainder
+
+
+def _parse_under_thousand(words: list[str]) -> int | None:
+    if not words:
+        return None
+
+    if "thousand" in words:
+        return None
+
+    if "hundred" not in words:
+        return _parse_under_hundred(words)
+
+    if words.count("hundred") > 1:
+        return None
+
+    hundred_index = words.index("hundred")
+    multiplier = _parse_single_digit(words[:hundred_index])
+    if multiplier is None or multiplier == 0:
+        return None
+
+    remainder_words = words[hundred_index + 1 :]
+    if remainder_words[:1] == ["and"]:
+        remainder_words = remainder_words[1:]
+
+    if not remainder_words:
+        return multiplier * 100
+
+    remainder = _parse_under_hundred(remainder_words)
+    if remainder is None:
+        return None
+
+    return multiplier * 100 + remainder
+
+
+def _parse_under_hundred(words: list[str]) -> int | None:
+    if len(words) == 1:
+        word = words[0]
+        if word in NUMBER_UNITS:
+            return NUMBER_UNITS[word]
+        if word in NUMBER_TEENS:
+            return NUMBER_TEENS[word]
+        if word in NUMBER_TENS:
+            return NUMBER_TENS[word]
+        return None
+
+    if len(words) == 2 and words[0] in NUMBER_TENS and words[1] in NUMBER_UNITS:
+        unit = NUMBER_UNITS[words[1]]
+        if unit == 0:
+            return None
+        return NUMBER_TENS[words[0]] + unit
+
+    return None
+
+
+def _parse_single_digit(words: list[str]) -> int | None:
+    if len(words) != 1:
+        return None
+
+    value = NUMBER_UNITS.get(words[0])
+    if value is None or value > 9:
+        return None
+
+    return value
+
+
+def _validate_reminder_text(
+    raw_reminder_text: str,
+    normalized_reminder_text: str,
+) -> None:
+    if not normalized_reminder_text:
+        raise CommandValidationError("Reminder text must not be empty.")
+
+    if len(normalized_reminder_text) > MAX_REMINDER_TEXT_LENGTH:
+        raise CommandValidationError("Reminder text is too long.")
+
+    if any(_is_control_character(character) for character in raw_reminder_text):
+        raise CommandValidationError(
+            "Reminder text contains unsupported control characters."
+        )
 
 
 def _route_note_command(text: str) -> CommandResponse | None:

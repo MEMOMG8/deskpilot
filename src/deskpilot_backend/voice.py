@@ -7,6 +7,7 @@ from deskpilot_backend.models import (
     VoiceCommandResponse,
 )
 from deskpilot_backend.notes import NoteStore
+from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.speech import SpeechEngineFactory
 from deskpilot_backend.transcription import WhisperTranscriptionService
 
@@ -22,6 +23,7 @@ def handle_voice_command(
     key_event_sender: KeyEventSender | None = None,
     system_status_reader: SystemStatusReader | None = None,
     note_store: NoteStore | None = None,
+    reminder_service: ReminderService | None = None,
     speech_engine_factory: SpeechEngineFactory | None = None,
 ) -> VoiceCommandResponse:
     transcription = transcription_service.transcribe(
@@ -47,6 +49,7 @@ def handle_voice_command(
         key_event_sender=key_event_sender,
         system_status_reader=system_status_reader,
         note_store=note_store,
+        reminder_service=reminder_service,
         speech_engine_factory=speech_engine_factory,
     )
 
