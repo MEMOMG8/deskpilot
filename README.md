@@ -72,6 +72,7 @@ python -m compileall src
 
 - [Architecture](docs/architecture.md)
 - [90-second demo script](docs/demo-script.md)
+- [Windows build](docs/windows-build.md)
 - [Security](SECURITY.md)
 
 ## Local Settings

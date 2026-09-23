@@ -29,6 +29,8 @@ reminders.json
 
 dist/
 build/
+*.spec
+*.toc
 *.egg-info/
 
 .DS_Store
