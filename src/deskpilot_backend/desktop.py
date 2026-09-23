@@ -1,13 +1,27 @@
 import logging
 import sys
+import threading
 
 from deskpilot_backend.desktop_state import (
     DesktopStateController,
+    NativeWakeWordCommandController,
     WakeWordVisualController,
+)
+from deskpilot_backend.desktop_voice import (
+    NativeVoiceCommandService,
+    run_native_voice_handoff,
 )
 from deskpilot_backend.wake_word import WakeWordError, WakeWordService
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _summarize_exception(error: BaseException) -> str:
+    root_error = error
+    while root_error.__cause__ is not None:
+        root_error = root_error.__cause__
+
+    return f"{type(root_error).__name__}: {root_error}"
 
 
 def main() -> int:
@@ -76,11 +90,14 @@ def main() -> int:
     class DesktopSignals(QObject):
         wake_word_detected = Signal()
         wake_word_error = Signal(str)
+        native_command_completed = Signal(object)
+        native_command_failed = Signal(str)
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
     state = DesktopStateController()
+    native_command_state = NativeWakeWordCommandController()
     overlay = ListeningOverlay()
     signals = DesktopSignals()
     visual_controller = WakeWordVisualController(
@@ -93,6 +110,8 @@ def main() -> int:
         on_detected=signals.wake_word_detected.emit,
         on_error=signals.wake_word_error.emit,
     )
+    native_voice_service = NativeVoiceCommandService()
+    wake_word_lock = threading.Lock()
     icon = app.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
 
     tray = QSystemTrayIcon(icon)
@@ -105,10 +124,24 @@ def main() -> int:
     quit_action = QAction("Quit DeskPilot")
 
     def update_tray_state() -> None:
-        wake_state = "on" if wake_word_service.is_running else "off"
+        wake_state = "on" if native_command_state.wake_word_enabled else "off"
+        if native_command_state.command_in_progress:
+            wake_state = f"{wake_state}, command in progress"
+
         tray.setToolTip(f"DeskPilot - wake word {wake_state}")
-        start_wake_action.setEnabled(not wake_word_service.is_running)
-        stop_wake_action.setEnabled(wake_word_service.is_running)
+        start_wake_action.setEnabled(
+            not native_command_state.wake_word_enabled
+            and not native_command_state.command_in_progress
+        )
+        stop_wake_action.setEnabled(native_command_state.wake_word_enabled)
+
+    def start_wake_word_service() -> None:
+        with wake_word_lock:
+            wake_word_service.start()
+
+    def stop_wake_word_service() -> None:
+        with wake_word_lock:
+            wake_word_service.stop()
 
     def show_border() -> None:
         state.show_listening_border()
@@ -119,10 +152,16 @@ def main() -> int:
         overlay.hide()
 
     def start_wake_word() -> None:
+        if native_command_state.command_in_progress:
+            tray.showMessage("DeskPilot", "Finish the current command first.")
+            return
+
+        native_command_state.enable_wake_word()
         try:
-            wake_word_service.start()
+            start_wake_word_service()
         except WakeWordError as error:
             LOGGER.exception("Wake-word listening startup failed.")
+            native_command_state.disable_wake_word()
             tray.showMessage("DeskPilot", str(error))
             update_tray_state()
             return
@@ -131,21 +170,73 @@ def main() -> int:
         tray.showMessage("DeskPilot", "Wake-word listening is enabled.")
 
     def stop_wake_word() -> None:
-        wake_word_service.stop()
+        native_command_state.disable_wake_word()
+        stop_wake_word_service()
         update_tray_state()
         tray.showMessage("DeskPilot", "Wake-word listening is stopped.")
 
     def on_wake_word_detected() -> None:
-        visual_controller.activate()
+        if not native_command_state.begin_command_after_wake_word():
+            return
+
+        visual_controller.activate(auto_hide=False)
+        update_tray_state()
         tray.showMessage("DeskPilot", "Hey Jarvis detected.")
 
+        worker = threading.Thread(
+            target=run_native_command_worker,
+            name="DeskPilotNativeVoiceCommand",
+            daemon=True,
+        )
+        worker.start()
+
     def on_wake_word_error(message: str) -> None:
-        wake_word_service.stop()
+        stop_wake_word_service()
+        native_command_state.disable_wake_word()
         update_tray_state()
         tray.showMessage("DeskPilot", message)
 
+    def run_native_command_worker() -> None:
+        try:
+            response = run_native_voice_handoff(
+                stop_wake_word=stop_wake_word_service,
+                run_voice_command=native_voice_service.run,
+            )
+        except Exception as error:
+            LOGGER.exception("Native voice command failed.")
+            signals.native_command_failed.emit(
+                f"Voice command failed: {_summarize_exception(error)}"
+            )
+            return
+
+        signals.native_command_completed.emit(response)
+
+    def finish_native_command() -> None:
+        visual_controller.deactivate()
+        should_resume = native_command_state.finish_command()
+
+        if should_resume:
+            try:
+                start_wake_word_service()
+            except WakeWordError as error:
+                LOGGER.exception("Wake-word listening resume failed.")
+                native_command_state.disable_wake_word()
+                tray.showMessage("DeskPilot", str(error))
+
+        update_tray_state()
+
+    def on_native_command_completed(response: object) -> None:
+        finish_native_command()
+        message = getattr(getattr(response, "assistant", None), "message", None)
+        tray.showMessage("DeskPilot", message or "Voice command completed.")
+
+    def on_native_command_failed(message: str) -> None:
+        finish_native_command()
+        tray.showMessage("DeskPilot", message)
+
     def quit_deskpilot() -> None:
-        wake_word_service.stop()
+        native_command_state.disable_wake_word()
+        stop_wake_word_service()
         overlay.hide()
         tray.hide()
         app.quit()
@@ -157,6 +248,8 @@ def main() -> int:
     quit_action.triggered.connect(quit_deskpilot)
     signals.wake_word_detected.connect(on_wake_word_detected)
     signals.wake_word_error.connect(on_wake_word_error)
+    signals.native_command_completed.connect(on_native_command_completed)
+    signals.native_command_failed.connect(on_native_command_failed)
 
     menu.addAction(show_action)
     menu.addAction(hide_action)
