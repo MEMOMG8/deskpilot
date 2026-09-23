@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Literal
 
-DesktopStateName = Literal["idle", "listening"]
+DesktopStateName = Literal["idle", "listening", "processing", "success", "error"]
+TerminalDesktopStateName = Literal["success", "error"]
 
 
 @dataclass
@@ -18,6 +19,18 @@ class DesktopStateController:
         self.state = "idle"
         return self.state
 
+    def show_processing_border(self) -> DesktopStateName:
+        self.state = "processing"
+        return self.state
+
+    def show_success_border(self) -> DesktopStateName:
+        self.state = "success"
+        return self.state
+
+    def show_error_border(self) -> DesktopStateName:
+        self.state = "error"
+        return self.state
+
     @property
     def is_listening(self) -> bool:
         return self.state == "listening"
@@ -26,20 +39,61 @@ class DesktopStateController:
 @dataclass
 class WakeWordVisualController:
     state: DesktopStateController
-    show_border: Callable[[], None]
+    show_border: Callable[[DesktopStateName], None]
     hide_border: Callable[[], None]
     schedule_hide: Callable[[int, Callable[[], None]], None]
     hide_delay_ms: int = 4000
+    terminal_delay_ms: int = 1200
 
     def activate(self, *, auto_hide: bool = True) -> None:
-        self.state.show_listening_border()
-        self.show_border()
+        self.show_listening()
         if auto_hide:
             self.schedule_hide(self.hide_delay_ms, self.deactivate)
+
+    def show_listening(self) -> None:
+        self.state.show_listening_border()
+        self.show_border(self.state.state)
+
+    def show_processing(self) -> None:
+        self.state.show_processing_border()
+        self.show_border(self.state.state)
+
+    def show_success(
+        self,
+        *,
+        auto_hide: bool = True,
+        after_hide: Callable[[], None] | None = None,
+    ) -> None:
+        self.state.show_success_border()
+        self.show_border(self.state.state)
+        if auto_hide:
+            self.schedule_hide(
+                self.terminal_delay_ms,
+                lambda: self._deactivate_then(after_hide),
+            )
+
+    def show_error(
+        self,
+        *,
+        auto_hide: bool = True,
+        after_hide: Callable[[], None] | None = None,
+    ) -> None:
+        self.state.show_error_border()
+        self.show_border(self.state.state)
+        if auto_hide:
+            self.schedule_hide(
+                self.terminal_delay_ms,
+                lambda: self._deactivate_then(after_hide),
+            )
 
     def deactivate(self) -> None:
         self.state.hide_border()
         self.hide_border()
+
+    def _deactivate_then(self, after_hide: Callable[[], None] | None) -> None:
+        self.deactivate()
+        if after_hide is not None:
+            after_hide()
 
 
 class NativeWakeWordCommandController:

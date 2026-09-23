@@ -70,6 +70,7 @@ class CommandResponse(BaseModel):
         "reminders",
         "get_time",
         "get_date",
+        "cancel",
         "help",
         "unknown",
     ]
@@ -105,6 +106,7 @@ class AssistantCommandResponse(BaseModel):
         "reminders",
         "get_time",
         "get_date",
+        "cancel",
         "help",
         "unknown",
     ]

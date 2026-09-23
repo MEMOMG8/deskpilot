@@ -38,7 +38,14 @@ python -m deskpilot_backend.desktop
 
 DeskPilot starts in the Windows system tray. Use the tray menu to choose `Show listening border`, `Hide border`, `Start wake word listening`, `Stop wake word listening`, or `Quit DeskPilot`. Wake-word listening is off by default.
 
-For the native end-to-end demo, choose `Start wake word listening`, say "Hey Jarvis", then speak "open calculator" while the cyan listening border is visible. DeskPilot stops the wake-word microphone stream, records one 4-second local command, transcribes it locally, runs the existing allowlisted assistant action flow, narrates the response with local TTS, hides the border, and resumes wake-word listening if it is still enabled.
+For the native end-to-end demo, choose `Start wake word listening`, say "Hey Jarvis", then speak "open calculator" while the cyan listening border is visible. DeskPilot plays a short local Windows cue when command recording begins, stops the wake-word microphone stream, records one fixed 4-second local command, transcribes it locally, runs the existing allowlisted assistant action flow, narrates the response with local TTS, hides the border, and resumes wake-word listening if it is still enabled.
+
+Native voice states:
+
+- Cyan: listening for the 4-second command
+- Amber: processing transcription and the allowlisted action
+- Green: completed successfully, then hides
+- Red: recoverable error or unknown command, then hides
 
 The first wake-word start may download/cache openWakeWord's local `hey_jarvis` model. openWakeWord code is Apache-2.0 licensed, while its included pre-trained models are licensed CC BY-NC-SA 4.0.
 
@@ -114,6 +121,11 @@ Information commands:
 - `how much disk space do I have`
 - `help`
 - `what can you do`
+
+Cancel commands:
+
+- `cancel`
+- `never mind`
 
 Volume commands:
 

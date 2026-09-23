@@ -25,10 +25,20 @@ NATIVE_COMMAND_DURATION_SECONDS = 4
 NATIVE_COMMAND_CONTENT_TYPE = "audio/wav"
 NATIVE_COMMAND_FILENAME = "native-microphone.wav"
 NATIVE_REMINDER_HINT = "Say: remind me in one minute to stretch."
+NATIVE_UNKNOWN_COMMAND_MESSAGE = "I didn't catch that. Say help for available commands."
+
+CuePlayer = Callable[[], None]
+ProgressCallback = Callable[[], None]
 
 
 class NativeVoiceCommandError(RuntimeError):
     """Raised when the native wake-word command handoff cannot complete."""
+
+
+def play_recording_start_cue() -> None:
+    import winsound
+
+    winsound.MessageBeep(winsound.MB_ICONASTERISK)
 
 
 @dataclass
@@ -43,23 +53,34 @@ class NativeVoiceCommandService:
     note_store: NoteStore | None = None
     reminder_service: ReminderService | None = None
     speech_engine_factory: SpeechEngineFactory | None = None
+    cue_player: CuePlayer = play_recording_start_cue
+    on_processing_started: ProgressCallback | None = None
 
     def run(self) -> VoiceCommandResponse:
         try:
+            try:
+                self.cue_player()
+            except Exception as error:
+                raise NativeVoiceCommandError("Recording cue is unavailable.") from error
+
             audio_bytes = self.recorder(NATIVE_COMMAND_DURATION_SECONDS)
-            return handle_voice_command(
+            if self.on_processing_started is not None:
+                self.on_processing_started()
+
+            response = handle_voice_command(
                 audio_bytes,
                 content_type=NATIVE_COMMAND_CONTENT_TYPE,
                 filename=NATIVE_COMMAND_FILENAME,
-                speak=True,
+                speak=False,
                 transcription_service=self.transcription_service,
                 launcher=self.launcher,
                 key_event_sender=self.key_event_sender,
                 system_status_reader=self.system_status_reader,
                 note_store=self.note_store,
                 reminder_service=self.reminder_service,
-                speech_engine_factory=self.speech_engine_factory,
             )
+            _narrate_native_response(response, self.speech_engine_factory)
+            return response
         except CommandValidationError as error:
             message = _native_validation_message(error)
             _try_speak_native_validation_message(message, self.speech_engine_factory)
@@ -72,6 +93,22 @@ class NativeVoiceCommandService:
             UnsupportedActionError,
         ) as error:
             raise NativeVoiceCommandError(str(error)) from error
+
+
+def _narrate_native_response(
+    response: VoiceCommandResponse,
+    speech_engine_factory: SpeechEngineFactory | None,
+) -> None:
+    if response.assistant.status == "not_supported":
+        response.assistant.message = NATIVE_UNKNOWN_COMMAND_MESSAGE
+
+    try:
+        speak_text(response.assistant.message, engine_factory=speech_engine_factory)
+    except SpeechEngineError:
+        response.assistant.speech_result = "unavailable"
+        return
+
+    response.assistant.speech_result = "completed"
 
 
 def _native_validation_message(error: CommandValidationError) -> str:

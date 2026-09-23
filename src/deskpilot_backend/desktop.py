@@ -3,6 +3,7 @@ import sys
 import threading
 
 from deskpilot_backend.desktop_state import (
+    DesktopStateName,
     DesktopStateController,
     NativeWakeWordCommandController,
     WakeWordVisualController,
@@ -15,6 +16,33 @@ from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.wake_word import WakeWordError, WakeWordService
 
 LOGGER = logging.getLogger(__name__)
+
+OVERLAY_STYLES = {
+    "listening": {
+        "label": "DeskPilot listening",
+        "color": (0, 188, 255),
+        "background": "rgba(0, 188, 255, 210)",
+        "foreground": "#001b2e",
+    },
+    "processing": {
+        "label": "DeskPilot processing",
+        "color": (255, 191, 71),
+        "background": "rgba(255, 191, 71, 220)",
+        "foreground": "#2b1600",
+    },
+    "success": {
+        "label": "DeskPilot done",
+        "color": (62, 201, 123),
+        "background": "rgba(62, 201, 123, 220)",
+        "foreground": "#052312",
+    },
+    "error": {
+        "label": "DeskPilot needs help",
+        "color": (255, 82, 82),
+        "background": "rgba(255, 82, 82, 220)",
+        "foreground": "#2b0000",
+    },
+}
 
 
 def _summarize_exception(error: BaseException) -> str:
@@ -57,15 +85,21 @@ def main() -> int:
                 | Qt.WindowType.WindowTransparentForInput
             )
 
+            self._state_name: DesktopStateName = "listening"
             self.label = QLabel("DeskPilot listening", self)
+            self._apply_state_style(self._state_name)
+            self._fit_primary_screen()
+
+        def _apply_state_style(self, state_name: DesktopStateName) -> None:
+            style = OVERLAY_STYLES.get(state_name, OVERLAY_STYLES["listening"])
+            self.label.setText(style["label"])
             self.label.setStyleSheet(
-                "background: rgba(0, 188, 255, 210);"
-                "color: #001b2e;"
+                f"background: {style['background']};"
+                f"color: {style['foreground']};"
                 "font: 700 13px 'Segoe UI';"
                 "padding: 6px 10px;"
                 "border-radius: 4px;"
             )
-            self._fit_primary_screen()
 
         def _fit_primary_screen(self) -> None:
             screen = QApplication.primaryScreen()
@@ -76,7 +110,9 @@ def main() -> int:
             self.label.adjustSize()
             self.label.move(16, 16)
 
-        def show_listening(self) -> None:
+        def show_state(self, state_name: DesktopStateName) -> None:
+            self._state_name = state_name
+            self._apply_state_style(state_name)
             self._fit_primary_screen()
             self.show()
             self.raise_()
@@ -84,13 +120,18 @@ def main() -> int:
         def paintEvent(self, event) -> None:  # noqa: N802
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-            pen = QPen(QColor(0, 188, 255), 4)
+            color = OVERLAY_STYLES.get(
+                self._state_name,
+                OVERLAY_STYLES["listening"],
+            )["color"]
+            pen = QPen(QColor(*color), 4)
             painter.setPen(pen)
             painter.drawRect(self.rect().adjusted(2, 2, -2, -2))
 
     class DesktopSignals(QObject):
         wake_word_detected = Signal()
         wake_word_error = Signal(str)
+        native_command_processing = Signal()
         native_command_completed = Signal(object)
         native_command_failed = Signal(str)
         reminder_due = Signal(str)
@@ -104,7 +145,7 @@ def main() -> int:
     signals = DesktopSignals()
     visual_controller = WakeWordVisualController(
         state=state,
-        show_border=overlay.show_listening,
+        show_border=overlay.show_state,
         hide_border=overlay.hide,
         schedule_hide=QTimer.singleShot,
     )
@@ -145,8 +186,7 @@ def main() -> int:
             wake_word_service.stop()
 
     def show_border() -> None:
-        state.show_listening_border()
-        overlay.show_listening()
+        visual_controller.show_listening()
 
     def hide_border() -> None:
         state.hide_border()
@@ -213,7 +253,6 @@ def main() -> int:
         signals.native_command_completed.emit(response)
 
     def finish_native_command() -> None:
-        visual_controller.deactivate()
         should_resume = native_command_state.finish_command()
 
         if should_resume:
@@ -226,13 +265,21 @@ def main() -> int:
 
         update_tray_state()
 
+    def on_native_command_processing() -> None:
+        visual_controller.show_processing()
+
     def on_native_command_completed(response: object) -> None:
-        finish_native_command()
         message = getattr(getattr(response, "assistant", None), "message", None)
+        assistant_status = getattr(getattr(response, "assistant", None), "status", None)
+        if assistant_status == "not_supported":
+            visual_controller.show_error(after_hide=finish_native_command)
+        else:
+            visual_controller.show_success(after_hide=finish_native_command)
+
         tray.showMessage("DeskPilot", message or "Voice command completed.")
 
     def on_native_command_failed(message: str) -> None:
-        finish_native_command()
+        visual_controller.show_error(after_hide=finish_native_command)
         tray.showMessage("DeskPilot", message)
 
     def on_reminder_due(message: str) -> None:
@@ -250,6 +297,7 @@ def main() -> int:
     reminder_service = ReminderService(notifier=signals.reminder_due.emit)
     native_voice_service = NativeVoiceCommandService(
         reminder_service=reminder_service,
+        on_processing_started=signals.native_command_processing.emit,
     )
 
     show_action.triggered.connect(show_border)
@@ -259,6 +307,7 @@ def main() -> int:
     quit_action.triggered.connect(quit_deskpilot)
     signals.wake_word_detected.connect(on_wake_word_detected)
     signals.wake_word_error.connect(on_wake_word_error)
+    signals.native_command_processing.connect(on_native_command_processing)
     signals.native_command_completed.connect(on_native_command_completed)
     signals.native_command_failed.connect(on_native_command_failed)
 

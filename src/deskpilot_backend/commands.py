@@ -24,7 +24,7 @@ HELP_MESSAGE = (
     "note remember this; read latest note; how many notes do I have; "
     "open notes folder; remind me in one minute to stretch; "
     "remind me in 10 minutes to stretch; list reminders; "
-    "what are my reminders; help; what can you do."
+    "what are my reminders; cancel; never mind; help; what can you do."
 )
 
 
@@ -144,6 +144,7 @@ NUMBER_TENS = {
 
 TIME_COMMANDS = {"what time is it", "what's the time"}
 DATE_COMMANDS = {"what is the date", "what's today's date"}
+CANCEL_COMMANDS = {"cancel", "never mind"}
 HELP_COMMANDS = {"help", "what can you do"}
 
 
@@ -275,6 +276,14 @@ def route_command(
             status="completed",
             requires_confirmation=False,
             message=_format_local_date(now_factory()),
+        )
+
+    if normalized_text in CANCEL_COMMANDS:
+        return CommandResponse(
+            intent="cancel",
+            status="completed",
+            requires_confirmation=False,
+            message="Cancelled.",
         )
 
     if normalized_text in HELP_COMMANDS:

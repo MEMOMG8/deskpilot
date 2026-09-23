@@ -5,6 +5,7 @@ from deskpilot_backend.desktop_state import NativeWakeWordCommandController
 from deskpilot_backend.desktop_voice import (
     NATIVE_COMMAND_DURATION_SECONDS,
     NATIVE_REMINDER_HINT,
+    NATIVE_UNKNOWN_COMMAND_MESSAGE,
     NativeVoiceCommandError,
     NativeVoiceCommandService,
     run_native_voice_handoff,
@@ -71,18 +72,26 @@ class FakeSpeechEngine:
 
 
 class FakeRecorder:
-    def __init__(self, audio_bytes: bytes) -> None:
+    def __init__(self, audio_bytes: bytes, events: list[str] | None = None) -> None:
         self.audio_bytes = audio_bytes
         self.durations: list[int] = []
+        self.events = events
 
     def __call__(self, duration_seconds: int) -> bytes:
+        if self.events is not None:
+            self.events.append("record")
         self.durations.append(duration_seconds)
         return self.audio_bytes
 
 
+def no_op_cue() -> None:
+    return None
+
+
 def test_native_voice_command_uses_existing_voice_pipeline_with_speech() -> None:
     wav_audio = encode_wav(b"\x00\x00" * 16000)
-    recorder = FakeRecorder(wav_audio)
+    events: list[str] = []
+    recorder = FakeRecorder(wav_audio, events)
     transcription_service = FakeTranscriptionService()
     launcher = RecordingLauncher()
     engine = FakeSpeechEngine()
@@ -91,6 +100,8 @@ def test_native_voice_command_uses_existing_voice_pipeline_with_speech() -> None
         recorder=recorder,
         launcher=launcher,
         speech_engine_factory=lambda: engine,
+        cue_player=lambda: events.append("cue"),
+        on_processing_started=lambda: events.append("processing"),
     )
 
     response = service.run()
@@ -109,6 +120,7 @@ def test_native_voice_command_uses_existing_voice_pipeline_with_speech() -> None
     assert launcher.commands == [["calc.exe"]]
     assert engine.spoken_text == ["Opening Calculator."]
     assert engine.completed is True
+    assert events == ["cue", "record", "processing"]
 
 
 def test_native_voice_command_can_execute_mocked_media_key_command() -> None:
@@ -123,6 +135,7 @@ def test_native_voice_command_can_execute_mocked_media_key_command() -> None:
         launcher=launcher,
         key_event_sender=key_event_sender,
         speech_engine_factory=lambda: engine,
+        cue_player=no_op_cue,
     )
 
     response = service.run()
@@ -139,6 +152,55 @@ def test_native_voice_command_can_execute_mocked_media_key_command() -> None:
     assert engine.spoken_text == ["Toggling media playback."]
 
 
+@pytest.mark.parametrize("text", ["cancel", "never mind"])
+def test_native_voice_cancel_command_executes_nothing_and_narrates(
+    text: str,
+) -> None:
+    wav_audio = encode_wav(b"\x00\x00" * 16000)
+    recorder = FakeRecorder(wav_audio)
+    launcher = RecordingLauncher()
+    engine = FakeSpeechEngine()
+    service = NativeVoiceCommandService(
+        transcription_service=FakeTranscriptionService(text),
+        recorder=recorder,
+        launcher=launcher,
+        speech_engine_factory=lambda: engine,
+        cue_player=no_op_cue,
+    )
+
+    response = service.run()
+
+    assert response.assistant.intent == "cancel"
+    assert response.assistant.status == "completed"
+    assert response.assistant.message == "Cancelled."
+    assert response.assistant.speech_result == "completed"
+    assert launcher.commands == []
+    assert engine.spoken_text == ["Cancelled."]
+
+
+def test_native_voice_unknown_command_is_narrated_without_exception() -> None:
+    wav_audio = encode_wav(b"\x00\x00" * 16000)
+    recorder = FakeRecorder(wav_audio)
+    launcher = RecordingLauncher()
+    engine = FakeSpeechEngine()
+    service = NativeVoiceCommandService(
+        transcription_service=FakeTranscriptionService("open paint"),
+        recorder=recorder,
+        launcher=launcher,
+        speech_engine_factory=lambda: engine,
+        cue_player=no_op_cue,
+    )
+
+    response = service.run()
+
+    assert response.assistant.intent == "unknown"
+    assert response.assistant.status == "not_supported"
+    assert response.assistant.message == NATIVE_UNKNOWN_COMMAND_MESSAGE
+    assert response.assistant.speech_result == "completed"
+    assert launcher.commands == []
+    assert engine.spoken_text == [NATIVE_UNKNOWN_COMMAND_MESSAGE]
+
+
 def test_native_voice_reminder_validation_error_is_narrated_helpfully() -> None:
     wav_audio = encode_wav(b"\x00\x00" * 16000)
     recorder = FakeRecorder(wav_audio)
@@ -151,6 +213,7 @@ def test_native_voice_reminder_validation_error_is_narrated_helpfully() -> None:
         recorder=recorder,
         launcher=launcher,
         speech_engine_factory=lambda: engine,
+        cue_player=no_op_cue,
     )
 
     with pytest.raises(NativeVoiceCommandError) as error:
@@ -182,6 +245,7 @@ def test_native_voice_command_failure_is_controlled() -> None:
         recorder=FailingRecorder(),
         launcher=RecordingLauncher(),
         speech_engine_factory=lambda: FakeSpeechEngine(),
+        cue_player=no_op_cue,
     )
 
     with pytest.raises(NativeVoiceCommandError) as error:
@@ -199,6 +263,7 @@ def test_native_voice_command_failure_recovery_can_resume_wake_word() -> None:
     service = NativeVoiceCommandService(
         transcription_service=FakeTranscriptionService(),
         recorder=FailingRecorder(),
+        cue_player=no_op_cue,
     )
 
     controller.enable_wake_word()
@@ -225,6 +290,7 @@ def test_native_voice_handoff_stops_wake_word_before_recording() -> None:
             recorder=FakeRecorder(encode_wav(b"\x00\x00" * 16000)),
             launcher=RecordingLauncher(),
             speech_engine_factory=lambda: FakeSpeechEngine(),
+            cue_player=no_op_cue,
         ).run()
 
     response = run_native_voice_handoff(

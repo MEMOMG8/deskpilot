@@ -230,6 +230,28 @@ def test_assistant_unknown_command_does_not_call_executor() -> None:
     assert launcher.commands == []
 
 
+@pytest.mark.parametrize("text", ["cancel", "never mind"])
+def test_assistant_cancel_commands_do_not_call_executor(text: str) -> None:
+    launcher = RecordingLauncher()
+    client = TestClient(app)
+
+    with mocked_dependencies(launcher=launcher):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": text},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "cancel",
+        "status": "completed",
+        "requires_confirmation": False,
+        "message": "Cancelled.",
+        "speech_result": "not_requested",
+    }
+    assert launcher.commands == []
+
+
 @pytest.mark.parametrize(
     ("text", "intent"),
     [

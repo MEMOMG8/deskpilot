@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from secrets import token_hex
+from time import time_ns
 
 DEFAULT_NOTES_DIRECTORY = Path.home() / "Documents" / "DeskPilot" / "notes"
 MAX_NOTE_TEXT_LENGTH = 1000
@@ -62,7 +62,7 @@ class NoteStore:
 
     @staticmethod
     def _generate_filename() -> str:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        timestamp = time_ns()
         return f"note_{timestamp}_{token_hex(4)}.txt"
 
 

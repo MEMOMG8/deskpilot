@@ -42,7 +42,7 @@ def test_wake_word_activation_enters_listening_then_returns_to_idle() -> None:
 
     visual_controller = WakeWordVisualController(
         state=controller,
-        show_border=lambda: visible_states.append("shown"),
+        show_border=lambda state_name: visible_states.append(state_name),
         hide_border=lambda: visible_states.append("hidden"),
         schedule_hide=schedule_hide,
     )
@@ -50,13 +50,13 @@ def test_wake_word_activation_enters_listening_then_returns_to_idle() -> None:
     visual_controller.activate()
 
     assert controller.state == "listening"
-    assert visible_states == ["shown"]
+    assert visible_states == ["listening"]
     assert scheduled_callbacks[0][0] == 4000
 
     scheduled_callbacks[0][1]()
 
     assert controller.state == "idle"
-    assert visible_states == ["shown", "hidden"]
+    assert visible_states == ["listening", "hidden"]
 
 
 def test_wake_word_activation_can_stay_visible_until_command_finishes() -> None:
@@ -66,7 +66,7 @@ def test_wake_word_activation_can_stay_visible_until_command_finishes() -> None:
 
     visual_controller = WakeWordVisualController(
         state=controller,
-        show_border=lambda: visible_states.append("shown"),
+        show_border=lambda state_name: visible_states.append(state_name),
         hide_border=lambda: visible_states.append("hidden"),
         schedule_hide=lambda delay_ms, callback: scheduled_callbacks.append(
             (delay_ms, callback)
@@ -76,13 +76,80 @@ def test_wake_word_activation_can_stay_visible_until_command_finishes() -> None:
     visual_controller.activate(auto_hide=False)
 
     assert controller.state == "listening"
-    assert visible_states == ["shown"]
+    assert visible_states == ["listening"]
     assert scheduled_callbacks == []
 
     visual_controller.deactivate()
 
     assert controller.state == "idle"
-    assert visible_states == ["shown", "hidden"]
+    assert visible_states == ["listening", "hidden"]
+
+
+def test_native_visual_controller_can_enter_processing_state() -> None:
+    controller = DesktopStateController()
+    visible_states: list[str] = []
+    visual_controller = WakeWordVisualController(
+        state=controller,
+        show_border=lambda state_name: visible_states.append(state_name),
+        hide_border=lambda: visible_states.append("hidden"),
+        schedule_hide=lambda delay_ms, callback: None,
+    )
+
+    visual_controller.show_processing()
+
+    assert controller.state == "processing"
+    assert visible_states == ["processing"]
+
+
+def test_native_visual_controller_shows_success_then_hides() -> None:
+    controller = DesktopStateController()
+    visible_states: list[str] = []
+    scheduled_callbacks = []
+    after_hide_calls: list[str] = []
+    visual_controller = WakeWordVisualController(
+        state=controller,
+        show_border=lambda state_name: visible_states.append(state_name),
+        hide_border=lambda: visible_states.append("hidden"),
+        schedule_hide=lambda delay_ms, callback: scheduled_callbacks.append(
+            (delay_ms, callback)
+        ),
+    )
+
+    visual_controller.show_success(after_hide=lambda: after_hide_calls.append("done"))
+
+    assert controller.state == "success"
+    assert visible_states == ["success"]
+    assert scheduled_callbacks[0][0] == 1200
+
+    scheduled_callbacks[0][1]()
+
+    assert controller.state == "idle"
+    assert visible_states == ["success", "hidden"]
+    assert after_hide_calls == ["done"]
+
+
+def test_native_visual_controller_shows_error_then_hides() -> None:
+    controller = DesktopStateController()
+    visible_states: list[str] = []
+    scheduled_callbacks = []
+    visual_controller = WakeWordVisualController(
+        state=controller,
+        show_border=lambda state_name: visible_states.append(state_name),
+        hide_border=lambda: visible_states.append("hidden"),
+        schedule_hide=lambda delay_ms, callback: scheduled_callbacks.append(
+            (delay_ms, callback)
+        ),
+    )
+
+    visual_controller.show_error()
+
+    assert controller.state == "error"
+    assert visible_states == ["error"]
+
+    scheduled_callbacks[0][1]()
+
+    assert controller.state == "idle"
+    assert visible_states == ["error", "hidden"]
 
 
 def test_native_wake_word_command_resumes_when_still_enabled() -> None:

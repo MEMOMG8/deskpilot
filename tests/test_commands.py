@@ -254,6 +254,18 @@ def test_help_commands_are_recognized(text: str) -> None:
     }
 
 
+@pytest.mark.parametrize("text", ["cancel", "never mind"])
+def test_cancel_commands_are_recognized_without_action(text: str) -> None:
+    response = route_command(text)
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "cancel",
+        "status": "completed",
+        "requires_confirmation": False,
+        "message": "Cancelled.",
+    }
+
+
 @pytest.mark.parametrize("text", ["what time is it", "what's the time"])
 def test_time_commands_return_local_time(text: str) -> None:
     response = route_command(
