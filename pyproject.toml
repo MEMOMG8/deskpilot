@@ -22,6 +22,9 @@ dev = [
     "pytest>=7.0",
 ]
 
+[tool.setuptools.package-data]
+deskpilot_backend = ["static/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

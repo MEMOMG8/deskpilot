@@ -1,6 +1,9 @@
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from deskpilot_backend.actions import ProcessLauncher, UnsupportedActionError, execute_action
 from deskpilot_backend.assistant import handle_assistant_command
@@ -34,6 +37,9 @@ from deskpilot_backend.voice import handle_voice_command
 
 app = FastAPI(title="DeskPilot")
 transcription_service = WhisperTranscriptionService()
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 def get_process_launcher() -> ProcessLauncher | None:
@@ -50,6 +56,11 @@ def get_transcription_service() -> WhisperTranscriptionService:
 
 def get_audio_recorder() -> AudioRecorder:
     return record_microphone_wav
+
+
+@app.get("/", include_in_schema=False)
+def serve_interface() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/api/v1/health")

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DeskPilot</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel" aria-labelledby="app-title">
+        <div class="heading">
+          <h1 id="app-title">DeskPilot</h1>
+          <p>Local voice assistant</p>
+        </div>
+
+        <button id="talk-button" class="talk-button" type="button">
+          Talk (4 seconds)
+        </button>
+
+        <div class="status-block" aria-live="polite">
+          <span class="label">Status</span>
+          <p id="status-text">Ready</p>
+        </div>
+
+        <section class="result-grid" aria-label="Voice command result">
+          <div>
+            <span class="label">Transcription</span>
+            <p id="transcription-text" class="empty">No transcription yet.</p>
+          </div>
+
+          <div>
+            <span class="label">Assistant</span>
+            <p id="assistant-message" class="empty">No response yet.</p>
+          </div>
+
+          <div>
+            <span class="label">Action</span>
+            <p id="action-text" class="empty">No action yet.</p>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

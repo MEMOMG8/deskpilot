@@ -1,0 +1,132 @@
+:root {
+  color-scheme: light dark;
+  font-family:
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  background: #f5f7fa;
+  color: #172033;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.panel {
+  width: min(100%, 560px);
+  border: 1px solid #d6dde8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 28px;
+  box-shadow: 0 16px 40px rgb(23 32 51 / 10%);
+}
+
+.heading {
+  margin-bottom: 24px;
+}
+
+h1,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 2rem;
+  line-height: 1.1;
+}
+
+.heading p {
+  margin-top: 8px;
+  color: #556275;
+}
+
+.talk-button {
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  border-radius: 8px;
+  background: #145df2;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.talk-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.status-block,
+.result-grid {
+  margin-top: 22px;
+}
+
+.status-block {
+  padding: 16px;
+  border: 1px solid #d6dde8;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.label {
+  display: block;
+  margin-bottom: 6px;
+  color: #66758a;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.result-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.result-grid > div {
+  padding-top: 14px;
+  border-top: 1px solid #e5e9f0;
+}
+
+.empty {
+  color: #66758a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    background: #111827;
+    color: #f8fafc;
+  }
+
+  .panel {
+    border-color: #2f3b52;
+    background: #172033;
+  }
+
+  .heading p,
+  .label,
+  .empty {
+    color: #a7b4c8;
+  }
+
+  .status-block {
+    border-color: #2f3b52;
+    background: #111827;
+  }
+
+  .result-grid > div {
+    border-top-color: #2f3b52;
+  }
+}

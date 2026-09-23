@@ -26,6 +26,10 @@ python -m uvicorn deskpilot_backend.main:app --reload
 
 Then visit `http://127.0.0.1:8000/api/v1/health`.
 
+## Browser Demo
+
+Open `http://127.0.0.1:8000`, click `Talk (4 seconds)`, and say "open calculator" immediately. The browser calls the existing local microphone command endpoint.
+
 ## API Endpoints
 
 - `GET /api/v1/health`
