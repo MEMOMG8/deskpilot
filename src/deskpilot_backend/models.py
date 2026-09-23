@@ -37,3 +37,11 @@ class ActionExecutionResponse(BaseModel):
     executed: bool
     action: ActionExecutionRequest
     message: str
+
+
+class AssistantCommandResponse(BaseModel):
+    intent: Literal["open_app", "help", "unknown"]
+    status: Literal["executed", "completed", "not_supported"]
+    requires_confirmation: bool
+    message: str
+    action: CommandAction | None = None
