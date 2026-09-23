@@ -15,7 +15,7 @@ class CommandRequest(BaseModel):
 
 
 class CommandAction(BaseModel):
-    type: Literal["open_app", "media_key"]
+    type: Literal["open_app", "media_key", "workspace_shortcut", "system_status"]
     target: Literal[
         "calculator",
         "notepad",
@@ -28,6 +28,13 @@ class CommandAction(BaseModel):
         "play_pause",
         "next_track",
         "previous_track",
+        "downloads",
+        "documents",
+        "desktop",
+        "task_manager",
+        "battery",
+        "memory",
+        "disk",
     ]
 
 
@@ -35,6 +42,8 @@ class CommandResponse(BaseModel):
     intent: Literal[
         "open_app",
         "media_control",
+        "workspace_shortcut",
+        "system_status",
         "get_time",
         "get_date",
         "help",
@@ -62,6 +71,8 @@ class AssistantCommandResponse(BaseModel):
     intent: Literal[
         "open_app",
         "media_control",
+        "workspace_shortcut",
+        "system_status",
         "get_time",
         "get_date",
         "help",

@@ -106,6 +106,56 @@ def test_media_commands_keep_deterministic_normalization() -> None:
     assert response.action.model_dump() == {"type": "media_key", "target": "volume_up"}
 
 
+@pytest.mark.parametrize(
+    ("text", "target"),
+    [
+        ("open downloads", "downloads"),
+        ("open documents", "documents"),
+        ("open desktop", "desktop"),
+        ("open task manager", "task_manager"),
+    ],
+)
+def test_workspace_shortcut_commands_are_recognized(text: str, target: str) -> None:
+    response = route_command(text)
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "workspace_shortcut",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "workspace_shortcut", "target": target},
+        "message": (
+            "Workspace shortcut was recognized, "
+            "but DeskPilot will not open it yet."
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    ("text", "target"),
+    [
+        ("battery status", "battery"),
+        ("what is my battery level", "battery"),
+        ("memory status", "memory"),
+        ("how much memory am I using", "memory"),
+        ("disk space", "disk"),
+        ("how much disk space do I have", "disk"),
+    ],
+)
+def test_system_status_commands_are_recognized(text: str, target: str) -> None:
+    response = route_command(text)
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "system_status",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "system_status", "target": target},
+        "message": (
+            "System status request was recognized, "
+            "but DeskPilot will not read it yet."
+        ),
+    }
+
+
 @pytest.mark.parametrize("text", ["help", "what can you do"])
 def test_help_commands_are_recognized(text: str) -> None:
     response = route_command(text)
@@ -171,6 +221,20 @@ def test_unknown_command_is_not_supported() -> None:
 
 def test_unknown_media_like_command_is_not_supported() -> None:
     response = route_command("play song")
+
+    assert response.intent == "unknown"
+    assert response.status == "not_supported"
+
+
+def test_unknown_workspace_like_command_is_not_supported() -> None:
+    response = route_command("open pictures")
+
+    assert response.intent == "unknown"
+    assert response.status == "not_supported"
+
+
+def test_unknown_status_like_command_is_not_supported() -> None:
+    response = route_command("cpu status")
 
     assert response.intent == "unknown"
     assert response.status == "not_supported"

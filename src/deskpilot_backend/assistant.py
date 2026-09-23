@@ -1,4 +1,9 @@
-from deskpilot_backend.actions import KeyEventSender, ProcessLauncher, execute_action
+from deskpilot_backend.actions import (
+    KeyEventSender,
+    ProcessLauncher,
+    SystemStatusReader,
+    execute_action,
+)
 from deskpilot_backend.commands import route_command
 from deskpilot_backend.models import (
     ActionExecutionRequest,
@@ -12,6 +17,7 @@ def handle_assistant_command(
     command: AssistantCommandRequest,
     launcher: ProcessLauncher | None = None,
     key_event_sender: KeyEventSender | None = None,
+    system_status_reader: SystemStatusReader | None = None,
     speech_engine_factory: SpeechEngineFactory | None = None,
 ) -> AssistantCommandResponse:
     routed_command = route_command(command.text)
@@ -32,6 +38,7 @@ def handle_assistant_command(
         ),
         launcher=launcher,
         key_event_sender=key_event_sender,
+        system_status_reader=system_status_reader,
     )
 
     response = AssistantCommandResponse(

@@ -63,6 +63,13 @@ Application commands:
 - `open explorer`
 - `open settings`
 - `open browser`
+- `open task manager`
+
+Workspace shortcuts:
+
+- `open downloads`
+- `open documents`
+- `open desktop`
 
 Information commands:
 
@@ -70,6 +77,12 @@ Information commands:
 - `what's the time`
 - `what is the date`
 - `what's today's date`
+- `battery status`
+- `what is my battery level`
+- `memory status`
+- `how much memory am I using`
+- `disk space`
+- `how much disk space do I have`
 - `help`
 - `what can you do`
 
@@ -92,6 +105,7 @@ Media commands:
 - `previous track`
 
 Media controls use fixed Windows virtual media keys and affect the active Windows media session.
+Workspace shortcuts use fixed Windows targets only. Folder shortcuts are derived from known local user directories; DeskPilot never accepts spoken paths. System status commands are read-only and use standard-library or Windows `ctypes` calls.
 
 ## Manual Speech Check
 

@@ -11,7 +11,10 @@ HELP_MESSAGE = (
     "open explorer; open settings; open browser; what time is it; what's the time; "
     "what is the date; what's today's date; volume up; turn volume up; "
     "volume down; turn volume down; mute; mute volume; play music; pause music; "
-    "next song; next track; previous song; previous track; help; what can you do."
+    "next song; next track; previous song; previous track; open downloads; "
+    "open documents; open desktop; open task manager; battery status; "
+    "what is my battery level; memory status; how much memory am I using; "
+    "disk space; how much disk space do I have; help; what can you do."
 )
 
 
@@ -43,6 +46,22 @@ MEDIA_COMMANDS = {
     "next track": "next_track",
     "previous song": "previous_track",
     "previous track": "previous_track",
+}
+
+WORKSPACE_COMMANDS = {
+    "open downloads": "downloads",
+    "open documents": "documents",
+    "open desktop": "desktop",
+    "open task manager": "task_manager",
+}
+
+SYSTEM_STATUS_COMMANDS = {
+    "battery status": "battery",
+    "what is my battery level": "battery",
+    "memory status": "memory",
+    "how much memory am i using": "memory",
+    "disk space": "disk",
+    "how much disk space do i have": "disk",
 }
 
 TIME_COMMANDS = {"what time is it", "what's the time"}
@@ -87,6 +106,36 @@ def route_command(
             requires_confirmation=False,
             action=CommandAction(type="media_key", target=MEDIA_COMMANDS[normalized_text]),
             message="Media control was recognized, but DeskPilot will not send it yet.",
+        )
+
+    if normalized_text in WORKSPACE_COMMANDS:
+        return CommandResponse(
+            intent="workspace_shortcut",
+            status="planned",
+            requires_confirmation=False,
+            action=CommandAction(
+                type="workspace_shortcut",
+                target=WORKSPACE_COMMANDS[normalized_text],
+            ),
+            message=(
+                "Workspace shortcut was recognized, "
+                "but DeskPilot will not open it yet."
+            ),
+        )
+
+    if normalized_text in SYSTEM_STATUS_COMMANDS:
+        return CommandResponse(
+            intent="system_status",
+            status="planned",
+            requires_confirmation=False,
+            action=CommandAction(
+                type="system_status",
+                target=SYSTEM_STATUS_COMMANDS[normalized_text],
+            ),
+            message=(
+                "System status request was recognized, "
+                "but DeskPilot will not read it yet."
+            ),
         )
 
     if normalized_text in TIME_COMMANDS:

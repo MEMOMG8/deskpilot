@@ -11,6 +11,7 @@ from deskpilot_backend.main import (
     get_key_event_sender,
     get_process_launcher,
     get_speech_engine_factory,
+    get_system_status_reader,
 )
 
 
@@ -32,6 +33,16 @@ class RecordingKeyEventSender:
         return object()
 
 
+class RecordingSystemStatusReader:
+    def __init__(self, messages: dict[str, str]) -> None:
+        self.messages = messages
+        self.targets: list[str] = []
+
+    def __call__(self, target: str) -> str:
+        self.targets.append(target)
+        return self.messages[target]
+
+
 class FakeSpeechEngine:
     def __init__(self) -> None:
         self.spoken_text: list[str] = []
@@ -48,6 +59,7 @@ class FakeSpeechEngine:
 def mocked_dependencies(
     launcher: RecordingLauncher | None = None,
     key_event_sender: RecordingKeyEventSender | None = None,
+    system_status_reader: RecordingSystemStatusReader | None = None,
     speech_engine_factory: object | None = None,
 ) -> Iterator[None]:
     if launcher is not None:
@@ -55,6 +67,11 @@ def mocked_dependencies(
 
     if key_event_sender is not None:
         app.dependency_overrides[get_key_event_sender] = lambda: key_event_sender
+
+    if system_status_reader is not None:
+        app.dependency_overrides[get_system_status_reader] = (
+            lambda: system_status_reader
+        )
 
     if speech_engine_factory is not None:
         app.dependency_overrides[get_speech_engine_factory] = (
@@ -247,6 +264,100 @@ def test_assistant_media_commands_route_and_send_fixed_key_events(
     }
     assert launcher.commands == []
     assert key_event_sender.events == [(virtual_key, 0), (virtual_key, KEYEVENTF_KEYUP)]
+
+
+@pytest.mark.parametrize(
+    ("text", "target", "expected_message"),
+    [
+        ("open downloads", "downloads", "Opening Downloads."),
+        ("open documents", "documents", "Opening Documents."),
+        ("open desktop", "desktop", "Opening Desktop."),
+        ("open task manager", "task_manager", "Opening Task Manager."),
+    ],
+)
+def test_assistant_workspace_commands_route_and_execute(
+    text: str,
+    target: str,
+    expected_message: str,
+) -> None:
+    launcher = RecordingLauncher()
+    client = TestClient(app)
+
+    with mocked_dependencies(launcher=launcher):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": text},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "workspace_shortcut",
+        "status": "executed",
+        "requires_confirmation": False,
+        "message": expected_message,
+        "speech_result": "not_requested",
+        "action": {"type": "workspace_shortcut", "target": target},
+    }
+    assert launcher.commands != []
+
+
+@pytest.mark.parametrize(
+    ("text", "target", "expected_message"),
+    [
+        ("battery status", "battery", "No battery detected."),
+        ("what is my battery level", "battery", "No battery detected."),
+        ("memory status", "memory", "Memory usage is 47%."),
+        ("how much memory am I using", "memory", "Memory usage is 47%."),
+        (
+            "disk space",
+            "disk",
+            "Disk space is 123.4 GB available of 476.8 GB on C:.",
+        ),
+        (
+            "how much disk space do I have",
+            "disk",
+            "Disk space is 123.4 GB available of 476.8 GB on C:.",
+        ),
+    ],
+)
+def test_assistant_system_status_commands_route_and_read_status(
+    text: str,
+    target: str,
+    expected_message: str,
+) -> None:
+    launcher = RecordingLauncher()
+    key_event_sender = RecordingKeyEventSender()
+    reader = RecordingSystemStatusReader(
+        {
+            "battery": "No battery detected.",
+            "memory": "Memory usage is 47%.",
+            "disk": "Disk space is 123.4 GB available of 476.8 GB on C:.",
+        }
+    )
+    client = TestClient(app)
+
+    with mocked_dependencies(
+        launcher=launcher,
+        key_event_sender=key_event_sender,
+        system_status_reader=reader,
+    ):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": text},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "system_status",
+        "status": "executed",
+        "requires_confirmation": False,
+        "message": expected_message,
+        "speech_result": "not_requested",
+        "action": {"type": "system_status", "target": target},
+    }
+    assert reader.targets == [target]
+    assert launcher.commands == []
+    assert key_event_sender.events == []
 
 
 def test_assistant_blank_input_is_rejected() -> None:
