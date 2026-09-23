@@ -1,6 +1,6 @@
 # DeskPilot
 
-DeskPilot is a local-first Windows desktop voice assistant portfolio project. This milestone contains a minimal Python backend with a deterministic typed-command router, safe calculator execution, assistant orchestration, and local text-to-speech.
+DeskPilot is a local-first Windows desktop voice assistant portfolio project. This milestone contains a minimal Python backend with a deterministic typed-command router, safe calculator execution, assistant orchestration, local text-to-speech, and offline file transcription.
 
 ## Local Setup
 
@@ -10,7 +10,7 @@ python -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
-The install includes `pyttsx3`, which uses the local Windows SAPI voice for text-to-speech.
+The install includes `pyttsx3`, which uses the local Windows SAPI voice for text-to-speech, plus `faster-whisper` and `python-multipart` for offline audio-file transcription.
 
 ## Run Tests
 
@@ -33,6 +33,7 @@ Then visit `http://127.0.0.1:8000/api/v1/health`.
 - `POST /api/v1/actions/execute`
 - `POST /api/v1/assistant/commands`
 - `POST /api/v1/speech/speak`
+- `POST /api/v1/transcriptions`
 
 ## Manual Speech Check
 
@@ -44,4 +45,12 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/speech/speak -C
 
 ```powershell
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/assistant/commands -ContentType 'application/json' -Body '{"text":"open calculator","speak":true}' | ConvertTo-Json -Depth 5
+```
+
+## Manual Transcription Check
+
+The first real transcription may download the local `tiny.en` Whisper model. After that, transcription runs locally on CPU.
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8000/api/v1/transcriptions" -F "audio_file=@C:\path\to\recording.wav;type=audio/wav"
 ```

@@ -1,4 +1,6 @@
-from fastapi import Depends, FastAPI, HTTPException
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 
 from deskpilot_backend.actions import ProcessLauncher, UnsupportedActionError, execute_action
 from deskpilot_backend.assistant import handle_assistant_command
@@ -12,10 +14,18 @@ from deskpilot_backend.models import (
     CommandResponse,
     SpeechRequest,
     SpeechResponse,
+    TranscriptionResponse,
 )
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
+from deskpilot_backend.transcription import (
+    EmptyAudioError,
+    TranscriptionServiceError,
+    UnsupportedAudioError,
+    WhisperTranscriptionService,
+)
 
 app = FastAPI(title="DeskPilot")
+transcription_service = WhisperTranscriptionService()
 
 
 def get_process_launcher() -> ProcessLauncher | None:
@@ -24,6 +34,10 @@ def get_process_launcher() -> ProcessLauncher | None:
 
 def get_speech_engine_factory() -> SpeechEngineFactory | None:
     return None
+
+
+def get_transcription_service() -> WhisperTranscriptionService:
+    return transcription_service
 
 
 @app.get("/api/v1/health")
@@ -81,3 +95,24 @@ def create_speech(
         return speak_text(speech.text, engine_factory=engine_factory)
     except SpeechEngineError as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.post("/api/v1/transcriptions", response_model=TranscriptionResponse)
+async def create_transcription(
+    audio_file: Annotated[UploadFile, File()],
+    service: WhisperTranscriptionService = Depends(get_transcription_service),
+) -> TranscriptionResponse:
+    audio_bytes = await audio_file.read()
+
+    try:
+        return service.transcribe(
+            audio_bytes,
+            content_type=audio_file.content_type,
+            filename=audio_file.filename,
+        )
+    except EmptyAudioError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except UnsupportedAudioError as error:
+        raise HTTPException(status_code=415, detail=str(error)) from error
+    except TranscriptionServiceError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error

@@ -68,3 +68,10 @@ class SpeechRequest(BaseModel):
 class SpeechResponse(BaseModel):
     status: Literal["completed"]
     message: str
+
+
+class TranscriptionResponse(BaseModel):
+    status: Literal["completed"]
+    message: str
+    text: str
+    language: str | None = None
