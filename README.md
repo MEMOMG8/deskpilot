@@ -10,7 +10,7 @@ python -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
-The install includes `pyttsx3`, which uses the local Windows SAPI voice for text-to-speech, `faster-whisper` and `python-multipart` for offline audio-file transcription, `sounddevice` for explicit local microphone capture, and `PySide6` for the native Windows tray shell.
+The install includes `pyttsx3`, which uses the local Windows SAPI voice for text-to-speech, `faster-whisper` and `python-multipart` for offline audio-file transcription, `sounddevice` for explicit local microphone capture, `PySide6` for the native Windows tray shell, and `openwakeword` for local wake-word detection.
 
 ## Run Tests
 
@@ -36,7 +36,9 @@ Open `http://127.0.0.1:8000`, click `Talk (4 seconds)`, and say "open calculator
 python -m deskpilot_backend.desktop
 ```
 
-DeskPilot starts in the Windows system tray. Use the tray menu to choose `Show listening border`, `Hide border`, or `Quit DeskPilot`. The border is visual only in this milestone.
+DeskPilot starts in the Windows system tray. Use the tray menu to choose `Show listening border`, `Hide border`, `Start wake word listening`, `Stop wake word listening`, or `Quit DeskPilot`. Wake-word listening is off by default. When enabled, saying "Hey Jarvis" shows the listening border for about 4 seconds, then returns to idle.
+
+The first wake-word start may download/cache openWakeWord's local `hey_jarvis` model. openWakeWord code is Apache-2.0 licensed, while its included pre-trained models are licensed CC BY-NC-SA 4.0.
 
 ## API Endpoints
 
