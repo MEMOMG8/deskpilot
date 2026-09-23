@@ -75,3 +75,8 @@ class TranscriptionResponse(BaseModel):
     message: str
     text: str
     language: str | None = None
+
+
+class VoiceCommandResponse(BaseModel):
+    transcription: TranscriptionResponse
+    assistant: AssistantCommandResponse

@@ -34,6 +34,7 @@ Then visit `http://127.0.0.1:8000/api/v1/health`.
 - `POST /api/v1/assistant/commands`
 - `POST /api/v1/speech/speak`
 - `POST /api/v1/transcriptions`
+- `POST /api/v1/voice/commands`
 
 ## Manual Speech Check
 
@@ -53,4 +54,12 @@ The first real transcription may download the local `tiny.en` Whisper model. Aft
 
 ```powershell
 curl.exe -X POST "http://127.0.0.1:8000/api/v1/transcriptions" -F "audio_file=@C:\path\to\recording.wav;type=audio/wav"
+```
+
+## Manual Voice Command Check
+
+Record a short English command such as "open calculator" with Windows Voice Recorder. The first real transcription may download the local `tiny.en` Whisper model; after that, transcription runs locally on CPU.
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8000/api/v1/voice/commands" -F "audio_file=@C:\path\to\recording.wav;type=audio/wav" -F "speak=true"
 ```

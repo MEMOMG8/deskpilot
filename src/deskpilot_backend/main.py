@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 
 from deskpilot_backend.actions import ProcessLauncher, UnsupportedActionError, execute_action
 from deskpilot_backend.assistant import handle_assistant_command
@@ -15,6 +15,7 @@ from deskpilot_backend.models import (
     SpeechRequest,
     SpeechResponse,
     TranscriptionResponse,
+    VoiceCommandResponse,
 )
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
 from deskpilot_backend.transcription import (
@@ -23,6 +24,7 @@ from deskpilot_backend.transcription import (
     UnsupportedAudioError,
     WhisperTranscriptionService,
 )
+from deskpilot_backend.voice import handle_voice_command
 
 app = FastAPI(title="DeskPilot")
 transcription_service = WhisperTranscriptionService()
@@ -116,3 +118,39 @@ async def create_transcription(
         raise HTTPException(status_code=415, detail=str(error)) from error
     except TranscriptionServiceError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.post(
+    "/api/v1/voice/commands",
+    response_model=VoiceCommandResponse,
+    response_model_exclude_none=True,
+)
+async def create_voice_command(
+    audio_file: Annotated[UploadFile, File()],
+    speak: Annotated[bool, Form()] = False,
+    service: WhisperTranscriptionService = Depends(get_transcription_service),
+    process_launcher: ProcessLauncher | None = Depends(get_process_launcher),
+    speech_engine_factory: SpeechEngineFactory | None = Depends(
+        get_speech_engine_factory
+    ),
+) -> VoiceCommandResponse:
+    audio_bytes = await audio_file.read()
+
+    try:
+        return handle_voice_command(
+            audio_bytes,
+            content_type=audio_file.content_type,
+            filename=audio_file.filename,
+            speak=speak,
+            transcription_service=service,
+            launcher=process_launcher,
+            speech_engine_factory=speech_engine_factory,
+        )
+    except EmptyAudioError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except UnsupportedAudioError as error:
+        raise HTTPException(status_code=415, detail=str(error)) from error
+    except TranscriptionServiceError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except UnsupportedActionError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
