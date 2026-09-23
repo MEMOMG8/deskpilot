@@ -6,16 +6,24 @@ from datetime import datetime
 from deskpilot_backend.models import CommandAction, CommandResponse
 
 TERMINAL_PUNCTUATION = ".,!?"
+MAX_SEARCH_QUERY_LENGTH = 120
 HELP_MESSAGE = (
     "Supported commands: open calculator; open notepad; open file explorer; "
-    "open explorer; open settings; open browser; what time is it; what's the time; "
-    "what is the date; what's today's date; volume up; turn volume up; "
+    "open explorer; open settings; open browser; open google; open youtube; "
+    "open github; search web for example query; search google for example query; "
+    "search youtube for example query; search github for example query; "
+    "what time is it; what's the time; what is the date; what's today's date; "
+    "volume up; turn volume up; "
     "volume down; turn volume down; mute; mute volume; play music; pause music; "
     "next song; next track; previous song; previous track; open downloads; "
     "open documents; open desktop; open task manager; battery status; "
     "what is my battery level; memory status; how much memory am I using; "
     "disk space; how much disk space do I have; help; what can you do."
 )
+
+
+class CommandValidationError(ValueError):
+    """Raised when a recognized command has an invalid parameter."""
 
 
 @dataclass(frozen=True)
@@ -31,6 +39,19 @@ APPLICATION_COMMANDS = {
     "open explorer": ApplicationCommand("file_explorer", "File Explorer"),
     "open settings": ApplicationCommand("settings", "Windows Settings"),
     "open browser": ApplicationCommand("browser", "the default browser"),
+}
+
+FIXED_SITE_COMMANDS = {
+    "open google": "google",
+    "open youtube": "youtube",
+    "open github": "github",
+}
+
+SEARCH_COMMAND_PREFIXES = {
+    "search web for": "web",
+    "search google for": "google",
+    "search youtube for": "youtube",
+    "search github for": "github",
 }
 
 MEDIA_COMMANDS = {
@@ -98,6 +119,22 @@ def route_command(
                 "but DeskPilot will not launch apps yet."
             ),
         )
+
+    if normalized_text in FIXED_SITE_COMMANDS:
+        return CommandResponse(
+            intent="open_site",
+            status="planned",
+            requires_confirmation=False,
+            action=CommandAction(
+                type="open_url",
+                target=FIXED_SITE_COMMANDS[normalized_text],
+            ),
+            message="Website was recognized, but DeskPilot will not open it yet.",
+        )
+
+    search_response = _route_search_command(normalized_text, text)
+    if search_response is not None:
+        return search_response
 
     if normalized_text in MEDIA_COMMANDS:
         return CommandResponse(
@@ -168,6 +205,46 @@ def route_command(
         requires_confirmation=False,
         message="That command is not supported yet.",
     )
+
+
+def _route_search_command(
+    normalized_text: str,
+    original_text: str,
+) -> CommandResponse | None:
+    for prefix, target in SEARCH_COMMAND_PREFIXES.items():
+        if normalized_text == prefix:
+            raise CommandValidationError("Search query must not be empty.")
+
+        prefix_with_space = f"{prefix} "
+        if normalized_text.startswith(prefix_with_space):
+            query = normalized_text.removeprefix(prefix_with_space)
+            _validate_search_query(query, original_text)
+            return CommandResponse(
+                intent="web_search",
+                status="planned",
+                requires_confirmation=False,
+                action=CommandAction(type="web_search", target=target, query=query),
+                message="Search was recognized, but DeskPilot will not open it yet.",
+            )
+
+    return None
+
+
+def _validate_search_query(query: str, original_text: str) -> None:
+    if not query.strip():
+        raise CommandValidationError("Search query must not be empty.")
+
+    if len(query) > MAX_SEARCH_QUERY_LENGTH:
+        raise CommandValidationError("Search query is too long.")
+
+    if any(_is_control_character(character) for character in original_text):
+        raise CommandValidationError(
+            "Search query contains unsupported control characters."
+        )
+
+
+def _is_control_character(character: str) -> bool:
+    return ord(character) < 32 or ord(character) == 127
 
 
 def _format_local_time(now: datetime) -> str:

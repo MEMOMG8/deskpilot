@@ -65,6 +65,19 @@ Application commands:
 - `open browser`
 - `open task manager`
 
+Fixed-site commands:
+
+- `open google`
+- `open youtube`
+- `open github`
+
+Search commands:
+
+- `search web for deskpilot`
+- `search google for python url encoding`
+- `search youtube for local voice assistant`
+- `search github for fastapi examples`
+
 Workspace shortcuts:
 
 - `open downloads`
@@ -106,6 +119,7 @@ Media commands:
 
 Media controls use fixed Windows virtual media keys and affect the active Windows media session.
 Workspace shortcuts use fixed Windows targets only. Folder shortcuts are derived from known local user directories; DeskPilot never accepts spoken paths. System status commands are read-only and use standard-library or Windows `ctypes` calls.
+Fixed-site commands use exact allowlisted HTTPS URLs. Search commands encode the query into the trusted search site's `q` parameter and open the results in the default browser; DeskPilot does not make direct HTTP requests.
 
 ## Manual Speech Check
 

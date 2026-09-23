@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import disk_usage
+from urllib.parse import urlencode
 
 from deskpilot_backend.models import ActionExecutionRequest, ActionExecutionResponse
 
@@ -13,6 +14,9 @@ OPEN_APP_ACTION_TYPE = "open_app"
 MEDIA_KEY_ACTION_TYPE = "media_key"
 WORKSPACE_SHORTCUT_ACTION_TYPE = "workspace_shortcut"
 SYSTEM_STATUS_ACTION_TYPE = "system_status"
+OPEN_URL_ACTION_TYPE = "open_url"
+WEB_SEARCH_ACTION_TYPE = "web_search"
+MAX_SEARCH_QUERY_LENGTH = 120
 KEYEVENTF_KEYUP = 0x0002
 VK_VOLUME_MUTE = 0xAD
 VK_VOLUME_DOWN = 0xAE
@@ -34,6 +38,9 @@ class ActionDefinition:
     virtual_key: int | None = None
     workspace_directory: str | None = None
     status_target: str | None = None
+    url: str | None = None
+    search_url: str | None = None
+    query_message_prefix: str | None = None
     unsupported_platform_message: str | None = None
 
 
@@ -135,6 +142,45 @@ ACTION_REGISTRY = {
         message="Checking disk space.",
         unsupported_platform_message="System status commands are only supported on Windows.",
     ),
+    (OPEN_URL_ACTION_TYPE, "google"): ActionDefinition(
+        action_type=OPEN_URL_ACTION_TYPE,
+        url="https://www.google.com/",
+        message="Opening Google.",
+    ),
+    (OPEN_URL_ACTION_TYPE, "youtube"): ActionDefinition(
+        action_type=OPEN_URL_ACTION_TYPE,
+        url="https://www.youtube.com/",
+        message="Opening YouTube.",
+    ),
+    (OPEN_URL_ACTION_TYPE, "github"): ActionDefinition(
+        action_type=OPEN_URL_ACTION_TYPE,
+        url="https://github.com/",
+        message="Opening GitHub.",
+    ),
+    (WEB_SEARCH_ACTION_TYPE, "web"): ActionDefinition(
+        action_type=WEB_SEARCH_ACTION_TYPE,
+        search_url="https://www.google.com/search",
+        query_message_prefix="Searching the web for",
+        message="Searching the web.",
+    ),
+    (WEB_SEARCH_ACTION_TYPE, "google"): ActionDefinition(
+        action_type=WEB_SEARCH_ACTION_TYPE,
+        search_url="https://www.google.com/search",
+        query_message_prefix="Searching Google for",
+        message="Searching Google.",
+    ),
+    (WEB_SEARCH_ACTION_TYPE, "youtube"): ActionDefinition(
+        action_type=WEB_SEARCH_ACTION_TYPE,
+        search_url="https://www.youtube.com/results",
+        query_message_prefix="Searching YouTube for",
+        message="Searching YouTube.",
+    ),
+    (WEB_SEARCH_ACTION_TYPE, "github"): ActionDefinition(
+        action_type=WEB_SEARCH_ACTION_TYPE,
+        search_url="https://github.com/search",
+        query_message_prefix="Searching GitHub for",
+        message="Searching GitHub.",
+    ),
 }
 SUPPORTED_ACTION_TYPES = {action_type for action_type, _target in ACTION_REGISTRY}
 
@@ -177,6 +223,13 @@ def execute_action(
     elif action_definition.status_target is not None:
         reader = system_status_reader or read_windows_system_status
         message = reader(action_definition.status_target)
+    elif action_definition.url is not None:
+        open_trusted_url(action_definition.url, launcher=launcher)
+    elif action_definition.search_url is not None:
+        query = validate_search_query(action.query)
+        search_url = build_search_url(action_definition.search_url, query)
+        open_trusted_url(search_url, launcher=launcher)
+        message = f"{action_definition.query_message_prefix} {query}."
 
     return ActionExecutionResponse(
         status="executed",
@@ -184,6 +237,39 @@ def execute_action(
         action=action,
         message=message,
     )
+
+
+def open_trusted_url(
+    url: str,
+    *,
+    launcher: ProcessLauncher | None = None,
+) -> None:
+    process_launcher = launcher or subprocess.Popen
+    process_launcher(["rundll32.exe", "url.dll,FileProtocolHandler", url])
+
+
+def build_search_url(search_url: str, query: str) -> str:
+    return f"{search_url}?{urlencode({'q': query})}"
+
+
+def validate_search_query(query: str | None) -> str:
+    if query is None or not query.strip():
+        raise UnsupportedActionError("Search query must not be empty.")
+
+    normalized_query = query.strip()
+    if len(normalized_query) > MAX_SEARCH_QUERY_LENGTH:
+        raise UnsupportedActionError("Search query is too long.")
+
+    if any(_is_control_character(character) for character in normalized_query):
+        raise UnsupportedActionError(
+            "Search query contains unsupported control characters."
+        )
+
+    return normalized_query
+
+
+def _is_control_character(character: str) -> bool:
+    return ord(character) < 32 or ord(character) == 127
 
 
 def send_windows_key_event(virtual_key: int, flags: int) -> object:

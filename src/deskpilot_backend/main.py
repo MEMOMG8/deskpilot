@@ -13,7 +13,7 @@ from deskpilot_backend.actions import (
     execute_action,
 )
 from deskpilot_backend.assistant import handle_assistant_command
-from deskpilot_backend.commands import route_command
+from deskpilot_backend.commands import CommandValidationError, route_command
 from deskpilot_backend.models import (
     ActionExecutionRequest,
     ActionExecutionResponse,
@@ -88,18 +88,23 @@ def health_check() -> dict[str, str]:
     response_model_exclude_none=True,
 )
 def create_command(command: CommandRequest) -> CommandResponse:
-    return route_command(command.text)
+    try:
+        return route_command(command.text)
+    except CommandValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.post("/api/v1/actions/execute", response_model=ActionExecutionResponse)
 def execute_planned_action(
     action: ActionExecutionRequest,
+    process_launcher: ProcessLauncher | None = Depends(get_process_launcher),
     key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     system_status_reader: SystemStatusReader | None = Depends(get_system_status_reader),
 ) -> ActionExecutionResponse:
     try:
         return execute_action(
             action,
+            launcher=process_launcher,
             key_event_sender=key_event_sender,
             system_status_reader=system_status_reader,
         )
@@ -129,6 +134,8 @@ def create_assistant_command(
             system_status_reader=system_status_reader,
             speech_engine_factory=speech_engine_factory,
         )
+    except CommandValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     except UnsupportedActionError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -201,6 +208,8 @@ async def create_voice_command(
         raise HTTPException(status_code=415, detail=str(error)) from error
     except TranscriptionServiceError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+    except CommandValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     except UnsupportedActionError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -242,5 +251,7 @@ def create_microphone_command(
         raise HTTPException(status_code=415, detail=str(error)) from error
     except TranscriptionServiceError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+    except CommandValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     except UnsupportedActionError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

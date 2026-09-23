@@ -35,6 +35,7 @@ def handle_assistant_command(
         ActionExecutionRequest(
             type=routed_command.action.type,
             target=routed_command.action.target,
+            query=routed_command.action.query,
         ),
         launcher=launcher,
         key_event_sender=key_event_sender,

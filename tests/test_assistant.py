@@ -267,6 +267,113 @@ def test_assistant_media_commands_route_and_send_fixed_key_events(
 
 
 @pytest.mark.parametrize(
+    ("text", "target", "expected_url", "expected_message"),
+    [
+        ("open google", "google", "https://www.google.com/", "Opening Google."),
+        ("open youtube", "youtube", "https://www.youtube.com/", "Opening YouTube."),
+        ("open github", "github", "https://github.com/", "Opening GitHub."),
+    ],
+)
+def test_assistant_fixed_site_commands_open_allowlisted_urls(
+    text: str,
+    target: str,
+    expected_url: str,
+    expected_message: str,
+) -> None:
+    launcher = RecordingLauncher()
+    client = TestClient(app)
+
+    with mocked_dependencies(launcher=launcher):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": text},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "open_site",
+        "status": "executed",
+        "requires_confirmation": False,
+        "message": expected_message,
+        "speech_result": "not_requested",
+        "action": {"type": "open_url", "target": target},
+    }
+    assert launcher.commands == [
+        ["rundll32.exe", "url.dll,FileProtocolHandler", expected_url]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("text", "target", "expected_url", "expected_message"),
+    [
+        (
+            "search web for cats & dogs",
+            "web",
+            "https://www.google.com/search?q=cats+%26+dogs",
+            "Searching the web for cats & dogs.",
+        ),
+        (
+            "search google for cats & dogs",
+            "google",
+            "https://www.google.com/search?q=cats+%26+dogs",
+            "Searching Google for cats & dogs.",
+        ),
+        (
+            "search youtube for cats & dogs",
+            "youtube",
+            "https://www.youtube.com/results?q=cats+%26+dogs",
+            "Searching YouTube for cats & dogs.",
+        ),
+        (
+            "search github for cats & dogs",
+            "github",
+            "https://github.com/search?q=cats+%26+dogs",
+            "Searching GitHub for cats & dogs.",
+        ),
+    ],
+)
+def test_assistant_search_commands_open_encoded_search_urls(
+    text: str,
+    target: str,
+    expected_url: str,
+    expected_message: str,
+) -> None:
+    launcher = RecordingLauncher()
+    client = TestClient(app)
+
+    with mocked_dependencies(launcher=launcher):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": text},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "web_search",
+        "status": "executed",
+        "requires_confirmation": False,
+        "message": expected_message,
+        "speech_result": "not_requested",
+        "action": {"type": "web_search", "target": target, "query": "cats & dogs"},
+    }
+    assert launcher.commands == [
+        ["rundll32.exe", "url.dll,FileProtocolHandler", expected_url]
+    ]
+
+
+def test_assistant_rejects_invalid_search_query() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/assistant/commands",
+        json={"text": "search google for"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Search query must not be empty."}
+
+
+@pytest.mark.parametrize(
     ("text", "target", "expected_message"),
     [
         ("open downloads", "downloads", "Opening Downloads."),

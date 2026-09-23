@@ -15,7 +15,14 @@ class CommandRequest(BaseModel):
 
 
 class CommandAction(BaseModel):
-    type: Literal["open_app", "media_key", "workspace_shortcut", "system_status"]
+    type: Literal[
+        "open_app",
+        "media_key",
+        "workspace_shortcut",
+        "system_status",
+        "open_url",
+        "web_search",
+    ]
     target: Literal[
         "calculator",
         "notepad",
@@ -35,7 +42,12 @@ class CommandAction(BaseModel):
         "battery",
         "memory",
         "disk",
+        "google",
+        "youtube",
+        "github",
+        "web",
     ]
+    query: str | None = None
 
 
 class CommandResponse(BaseModel):
@@ -44,6 +56,8 @@ class CommandResponse(BaseModel):
         "media_control",
         "workspace_shortcut",
         "system_status",
+        "open_site",
+        "web_search",
         "get_time",
         "get_date",
         "help",
@@ -58,6 +72,7 @@ class CommandResponse(BaseModel):
 class ActionExecutionRequest(BaseModel):
     type: str
     target: str
+    query: str | None = None
 
 
 class ActionExecutionResponse(BaseModel):
@@ -73,6 +88,8 @@ class AssistantCommandResponse(BaseModel):
         "media_control",
         "workspace_shortcut",
         "system_status",
+        "open_site",
+        "web_search",
         "get_time",
         "get_date",
         "help",

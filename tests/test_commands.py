@@ -1,9 +1,10 @@
 from datetime import datetime
+import re
 
 import pytest
 from fastapi.testclient import TestClient
 
-from deskpilot_backend.commands import HELP_MESSAGE, route_command
+from deskpilot_backend.commands import CommandValidationError, HELP_MESSAGE, route_command
 from deskpilot_backend.main import app
 
 
@@ -72,6 +73,88 @@ def test_open_calculator_please_remains_unsupported() -> None:
 @pytest.mark.parametrize(
     ("text", "target"),
     [
+        ("open google", "google"),
+        ("open youtube", "youtube"),
+        ("open github", "github"),
+    ],
+)
+def test_fixed_site_commands_are_recognized(text: str, target: str) -> None:
+    response = route_command(text)
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "open_site",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "open_url", "target": target},
+        "message": "Website was recognized, but DeskPilot will not open it yet.",
+    }
+
+
+@pytest.mark.parametrize(
+    ("text", "target", "query"),
+    [
+        ("search web for deskpilot", "web", "deskpilot"),
+        ("search google for python url encoding", "google", "python url encoding"),
+        ("search youtube for lo fi music", "youtube", "lo fi music"),
+        ("search github for fastapi examples", "github", "fastapi examples"),
+    ],
+)
+def test_search_commands_are_recognized(
+    text: str,
+    target: str,
+    query: str,
+) -> None:
+    response = route_command(text)
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "web_search",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "web_search", "target": target, "query": query},
+        "message": "Search was recognized, but DeskPilot will not open it yet.",
+    }
+
+
+def test_search_query_is_not_interpreted_as_url() -> None:
+    response = route_command("search google for https://example.com/delete")
+
+    assert response.intent == "web_search"
+    assert response.action is not None
+    assert response.action.query == "https://example.com/delete"
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("search google for", "Search query must not be empty."),
+        ("search google for     ", "Search query must not be empty."),
+        (
+            "search youtube for line\nbreak",
+            "Search query contains unsupported control characters.",
+        ),
+        (f"search github for {'a' * 121}", "Search query is too long."),
+    ],
+)
+def test_invalid_search_queries_are_rejected(text: str, message: str) -> None:
+    with pytest.raises(CommandValidationError, match=re.escape(message)):
+        route_command(text)
+
+
+def test_commands_endpoint_rejects_invalid_search_query() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/commands",
+        json={"text": "search google for"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Search query must not be empty."}
+
+
+@pytest.mark.parametrize(
+    ("text", "target"),
+    [
         ("volume up", "volume_up"),
         ("turn volume up", "volume_up"),
         ("volume down", "volume_down"),
@@ -103,7 +186,10 @@ def test_media_commands_keep_deterministic_normalization() -> None:
 
     assert response.intent == "media_control"
     assert response.action is not None
-    assert response.action.model_dump() == {"type": "media_key", "target": "volume_up"}
+    assert response.action.model_dump(exclude_none=True) == {
+        "type": "media_key",
+        "target": "volume_up",
+    }
 
 
 @pytest.mark.parametrize(

@@ -10,12 +10,18 @@ from deskpilot_backend.actions import (
     VK_VOLUME_MUTE,
     VK_VOLUME_UP,
     UnsupportedActionError,
+    build_search_url,
     execute_action,
     format_battery_status,
     format_disk_status,
     format_memory_status,
 )
-from deskpilot_backend.main import app, get_key_event_sender, get_system_status_reader
+from deskpilot_backend.main import (
+    app,
+    get_key_event_sender,
+    get_process_launcher,
+    get_system_status_reader,
+)
 from deskpilot_backend.models import ActionExecutionRequest
 
 
@@ -76,6 +82,80 @@ def test_open_app_actions_are_allowed_with_fixed_commands(
     assert response.action == action
     assert response.message == expected_message
     assert launcher.commands == [expected_command]
+
+
+@pytest.mark.parametrize(
+    ("target", "expected_url", "expected_message"),
+    [
+        ("google", "https://www.google.com/", "Opening Google."),
+        ("youtube", "https://www.youtube.com/", "Opening YouTube."),
+        ("github", "https://github.com/", "Opening GitHub."),
+    ],
+)
+def test_fixed_site_actions_are_allowed_with_exact_https_urls(
+    target: str,
+    expected_url: str,
+    expected_message: str,
+) -> None:
+    launcher = RecordingLauncher()
+    action = ActionExecutionRequest(type="open_url", target=target)
+
+    response = execute_action(action, launcher=launcher)
+
+    assert response.executed is True
+    assert response.status == "executed"
+    assert response.action == action
+    assert response.message == expected_message
+    assert launcher.commands == [
+        ["rundll32.exe", "url.dll,FileProtocolHandler", expected_url]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("target", "base_url", "expected_message"),
+    [
+        ("web", "https://www.google.com/search", "Searching the web for cats & dogs."),
+        ("google", "https://www.google.com/search", "Searching Google for cats & dogs."),
+        (
+            "youtube",
+            "https://www.youtube.com/results",
+            "Searching YouTube for cats & dogs.",
+        ),
+        ("github", "https://github.com/search", "Searching GitHub for cats & dogs."),
+    ],
+)
+def test_search_actions_encode_query_in_trusted_q_parameter(
+    target: str,
+    base_url: str,
+    expected_message: str,
+) -> None:
+    launcher = RecordingLauncher()
+    action = ActionExecutionRequest(
+        type="web_search",
+        target=target,
+        query="cats & dogs",
+    )
+
+    response = execute_action(action, launcher=launcher)
+
+    assert response.executed is True
+    assert response.status == "executed"
+    assert response.action == action
+    assert response.message == expected_message
+    assert launcher.commands == [
+        [
+            "rundll32.exe",
+            "url.dll,FileProtocolHandler",
+            f"{base_url}?q=cats+%26+dogs",
+        ]
+    ]
+
+
+def test_build_search_url_uses_q_parameter_only() -> None:
+    assert (
+        build_search_url("https://github.com/search", "deskpilot python")
+        == "https://github.com/search?q=deskpilot+python"
+    )
 
 
 @pytest.mark.parametrize(
@@ -274,6 +354,48 @@ def test_unsupported_status_target_is_rejected_and_never_reads_status() -> None:
     assert reader.targets == []
 
 
+def test_unsupported_fixed_site_target_is_rejected_and_never_opens_browser() -> None:
+    launcher = RecordingLauncher()
+    action = ActionExecutionRequest(type="open_url", target="example")
+
+    with pytest.raises(UnsupportedActionError, match="Unsupported action target"):
+        execute_action(action, launcher=launcher)
+
+    assert launcher.commands == []
+
+
+def test_unsupported_search_target_is_rejected_and_never_opens_browser() -> None:
+    launcher = RecordingLauncher()
+    action = ActionExecutionRequest(type="web_search", target="bing", query="deskpilot")
+
+    with pytest.raises(UnsupportedActionError, match="Unsupported action target"):
+        execute_action(action, launcher=launcher)
+
+    assert launcher.commands == []
+
+
+@pytest.mark.parametrize(
+    ("query", "message"),
+    [
+        (None, "Search query must not be empty."),
+        ("", "Search query must not be empty."),
+        ("line\nbreak", "Search query contains unsupported control characters."),
+        ("a" * 121, "Search query is too long."),
+    ],
+)
+def test_invalid_search_action_queries_are_rejected_without_opening_browser(
+    query: str | None,
+    message: str,
+) -> None:
+    launcher = RecordingLauncher()
+    action = ActionExecutionRequest(type="web_search", target="google", query=query)
+
+    with pytest.raises(UnsupportedActionError, match=message):
+        execute_action(action, launcher=launcher)
+
+    assert launcher.commands == []
+
+
 def test_unsupported_action_type_is_rejected_and_never_launches_process() -> None:
     launcher = RecordingLauncher()
     action = ActionExecutionRequest(type="delete_file", target="calculator")
@@ -330,3 +452,31 @@ def test_actions_execute_endpoint_uses_mocked_system_status_reader() -> None:
     assert response.status_code == 200
     assert response.json()["message"] == "No battery detected."
     assert reader.targets == ["battery"]
+
+
+def test_actions_execute_endpoint_uses_mocked_browser_launcher() -> None:
+    launcher = RecordingLauncher()
+    client = TestClient(app)
+    app.dependency_overrides[get_process_launcher] = lambda: launcher
+
+    try:
+        response = client.post(
+            "/api/v1/actions/execute",
+            json={
+                "type": "web_search",
+                "target": "google",
+                "query": "deskpilot test",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Searching Google for deskpilot test."
+    assert launcher.commands == [
+        [
+            "rundll32.exe",
+            "url.dll,FileProtocolHandler",
+            "https://www.google.com/search?q=deskpilot+test",
+        ]
+    ]
