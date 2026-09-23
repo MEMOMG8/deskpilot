@@ -78,6 +78,14 @@ Search commands:
 - `search youtube for local voice assistant`
 - `search github for fastapi examples`
 
+Notes commands:
+
+- `take a note remember this`
+- `note remember this`
+- `read latest note`
+- `how many notes do I have`
+- `open notes folder`
+
 Workspace shortcuts:
 
 - `open downloads`
@@ -120,6 +128,7 @@ Media commands:
 Media controls use fixed Windows virtual media keys and affect the active Windows media session.
 Workspace shortcuts use fixed Windows targets only. Folder shortcuts are derived from known local user directories; DeskPilot never accepts spoken paths. System status commands are read-only and use standard-library or Windows `ctypes` calls.
 Fixed-site commands use exact allowlisted HTTPS URLs. Search commands encode the query into the trusted search site's `q` parameter and open the results in the default browser; DeskPilot does not make direct HTTP requests.
+Notes are saved as plain-text UTF-8 `.txt` files under `~/Documents/DeskPilot/notes`. DeskPilot never accepts spoken note paths or filenames, never overwrites an existing note, and does not sync or send note content anywhere.
 
 ## Manual Speech Check
 

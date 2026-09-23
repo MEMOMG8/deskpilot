@@ -22,6 +22,7 @@ class CommandAction(BaseModel):
         "system_status",
         "open_url",
         "web_search",
+        "note",
     ]
     target: Literal[
         "calculator",
@@ -46,6 +47,10 @@ class CommandAction(BaseModel):
         "youtube",
         "github",
         "web",
+        "create",
+        "read_latest",
+        "count",
+        "open_folder",
     ]
     query: str | None = None
 
@@ -58,6 +63,7 @@ class CommandResponse(BaseModel):
         "system_status",
         "open_site",
         "web_search",
+        "notes",
         "get_time",
         "get_date",
         "help",
@@ -90,6 +96,7 @@ class AssistantCommandResponse(BaseModel):
         "system_status",
         "open_site",
         "web_search",
+        "notes",
         "get_time",
         "get_date",
         "help",

@@ -326,6 +326,80 @@ def test_unknown_status_like_command_is_not_supported() -> None:
     assert response.status == "not_supported"
 
 
+@pytest.mark.parametrize(
+    ("text", "note_text"),
+    [
+        ("take a note Buy milk", "Buy milk"),
+        ("note Call Manuel tomorrow.", "Call Manuel tomorrow."),
+        ("  NOTE   collapse     extra     spaces  ", "collapse extra spaces"),
+    ],
+)
+def test_note_create_commands_are_recognized(text: str, note_text: str) -> None:
+    response = route_command(text)
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "notes",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "note", "target": "create", "query": note_text},
+        "message": "Note was recognized, but DeskPilot will not save it yet.",
+    }
+
+
+@pytest.mark.parametrize(
+    ("text", "target"),
+    [
+        ("read latest note", "read_latest"),
+        ("how many notes do I have", "count"),
+        ("open notes folder", "open_folder"),
+    ],
+)
+def test_note_management_commands_are_recognized(text: str, target: str) -> None:
+    response = route_command(text)
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "notes",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "note", "target": target},
+        "message": "Notes command was recognized, but DeskPilot will not run it yet.",
+    }
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("take a note", "Note text must not be empty."),
+        ("note", "Note text must not be empty."),
+        ("take a note     ", "Note text must not be empty."),
+        (
+            "note line\nbreak",
+            "Note text contains unsupported control characters.",
+        ),
+        (f"note {'a' * 1001}", "Note text is too long."),
+    ],
+)
+def test_invalid_note_commands_are_rejected(text: str, message: str) -> None:
+    with pytest.raises(CommandValidationError, match=re.escape(message)):
+        route_command(text)
+
+
+def test_commands_endpoint_rejects_invalid_note_text() -> None:
+    client = TestClient(app)
+
+    response = client.post("/api/v1/commands", json={"text": "note"})
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Note text must not be empty."}
+
+
+def test_unknown_note_like_command_is_not_supported() -> None:
+    response = route_command("delete latest note")
+
+    assert response.intent == "unknown"
+    assert response.status == "not_supported"
+
+
 def test_commands_endpoint_rejects_blank_text() -> None:
     client = TestClient(app)
 

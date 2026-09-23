@@ -9,10 +9,12 @@ from deskpilot_backend.commands import HELP_MESSAGE
 from deskpilot_backend.main import (
     app,
     get_key_event_sender,
+    get_note_store,
     get_process_launcher,
     get_speech_engine_factory,
     get_system_status_reader,
 )
+from deskpilot_backend.notes import NoteStore
 
 
 class RecordingLauncher:
@@ -60,6 +62,7 @@ def mocked_dependencies(
     launcher: RecordingLauncher | None = None,
     key_event_sender: RecordingKeyEventSender | None = None,
     system_status_reader: RecordingSystemStatusReader | None = None,
+    note_store: NoteStore | None = None,
     speech_engine_factory: object | None = None,
 ) -> Iterator[None]:
     if launcher is not None:
@@ -72,6 +75,9 @@ def mocked_dependencies(
         app.dependency_overrides[get_system_status_reader] = (
             lambda: system_status_reader
         )
+
+    if note_store is not None:
+        app.dependency_overrides[get_note_store] = lambda: note_store
 
     if speech_engine_factory is not None:
         app.dependency_overrides[get_speech_engine_factory] = (
@@ -465,6 +471,103 @@ def test_assistant_system_status_commands_route_and_read_status(
     assert reader.targets == [target]
     assert launcher.commands == []
     assert key_event_sender.events == []
+
+
+def test_assistant_note_create_saves_to_temp_store(tmp_path) -> None:
+    note_store = NoteStore(tmp_path / "notes")
+    client = TestClient(app)
+
+    with mocked_dependencies(note_store=note_store):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "take a note Buy milk"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "notes",
+        "status": "executed",
+        "requires_confirmation": False,
+        "message": "Note saved.",
+        "speech_result": "not_requested",
+        "action": {"type": "note", "target": "create", "query": "Buy milk"},
+    }
+    assert note_store.count_notes() == 1
+
+
+def test_assistant_note_read_count_and_open_folder_use_temp_store(tmp_path) -> None:
+    note_store = NoteStore(tmp_path / "notes")
+    launcher = RecordingLauncher()
+    client = TestClient(app)
+
+    note_store.create_note("Remember the demo.")
+
+    with mocked_dependencies(launcher=launcher, note_store=note_store):
+        latest = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "read latest note"},
+        )
+        count = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "how many notes do I have"},
+        )
+        folder = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "open notes folder"},
+        )
+
+    assert latest.status_code == 200
+    assert latest.json()["message"] == "Latest note: Remember the demo."
+    assert count.status_code == 200
+    assert count.json()["message"] == "You have 1 note."
+    assert folder.status_code == 200
+    assert folder.json()["message"] == "Opening notes folder."
+    assert launcher.commands == [["explorer.exe", str(note_store.notes_directory)]]
+
+
+def test_assistant_note_read_latest_handles_empty_store(tmp_path) -> None:
+    client = TestClient(app)
+
+    with mocked_dependencies(note_store=NoteStore(tmp_path / "notes")):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "read latest note"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "You do not have any notes yet."
+
+
+def test_assistant_note_with_speak_narrates_existing_tts_response(tmp_path) -> None:
+    note_store = NoteStore(tmp_path / "notes")
+    engine = FakeSpeechEngine()
+    client = TestClient(app)
+
+    with mocked_dependencies(
+        note_store=note_store,
+        speech_engine_factory=lambda: engine,
+    ):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "note Read this aloud", "speak": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Note saved."
+    assert response.json()["speech_result"] == "completed"
+    assert engine.spoken_text == ["Note saved."]
+
+
+def test_assistant_rejects_invalid_note_text() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/assistant/commands",
+        json={"text": "take a note"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Note text must not be empty."}
 
 
 def test_assistant_blank_input_is_rejected() -> None:

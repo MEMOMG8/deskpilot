@@ -27,6 +27,7 @@ from deskpilot_backend.models import (
     TranscriptionResponse,
     VoiceCommandResponse,
 )
+from deskpilot_backend.notes import NoteStore
 from deskpilot_backend.microphone import (
     AudioRecorder,
     MicrophoneError,
@@ -57,6 +58,10 @@ def get_key_event_sender() -> KeyEventSender | None:
 
 
 def get_system_status_reader() -> SystemStatusReader | None:
+    return None
+
+
+def get_note_store() -> NoteStore | None:
     return None
 
 
@@ -100,6 +105,7 @@ def execute_planned_action(
     process_launcher: ProcessLauncher | None = Depends(get_process_launcher),
     key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     system_status_reader: SystemStatusReader | None = Depends(get_system_status_reader),
+    note_store: NoteStore | None = Depends(get_note_store),
 ) -> ActionExecutionResponse:
     try:
         return execute_action(
@@ -107,6 +113,7 @@ def execute_planned_action(
             launcher=process_launcher,
             key_event_sender=key_event_sender,
             system_status_reader=system_status_reader,
+            note_store=note_store,
         )
     except UnsupportedActionError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -122,6 +129,7 @@ def create_assistant_command(
     process_launcher: ProcessLauncher | None = Depends(get_process_launcher),
     key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     system_status_reader: SystemStatusReader | None = Depends(get_system_status_reader),
+    note_store: NoteStore | None = Depends(get_note_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -132,6 +140,7 @@ def create_assistant_command(
             launcher=process_launcher,
             key_event_sender=key_event_sender,
             system_status_reader=system_status_reader,
+            note_store=note_store,
             speech_engine_factory=speech_engine_factory,
         )
     except CommandValidationError as error:
@@ -184,6 +193,7 @@ async def create_voice_command(
     process_launcher: ProcessLauncher | None = Depends(get_process_launcher),
     key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     system_status_reader: SystemStatusReader | None = Depends(get_system_status_reader),
+    note_store: NoteStore | None = Depends(get_note_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -200,6 +210,7 @@ async def create_voice_command(
             launcher=process_launcher,
             key_event_sender=key_event_sender,
             system_status_reader=system_status_reader,
+            note_store=note_store,
             speech_engine_factory=speech_engine_factory,
         )
     except EmptyAudioError as error:
@@ -226,6 +237,7 @@ def create_microphone_command(
     process_launcher: ProcessLauncher | None = Depends(get_process_launcher),
     key_event_sender: KeyEventSender | None = Depends(get_key_event_sender),
     system_status_reader: SystemStatusReader | None = Depends(get_system_status_reader),
+    note_store: NoteStore | None = Depends(get_note_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -241,6 +253,7 @@ def create_microphone_command(
             launcher=process_launcher,
             key_event_sender=key_event_sender,
             system_status_reader=system_status_reader,
+            note_store=note_store,
             speech_engine_factory=speech_engine_factory,
         )
     except MicrophoneError as error:

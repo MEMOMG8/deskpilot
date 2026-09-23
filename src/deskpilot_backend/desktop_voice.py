@@ -9,6 +9,7 @@ from deskpilot_backend.actions import (
 )
 from deskpilot_backend.microphone import AudioRecorder, MicrophoneError, record_microphone_wav
 from deskpilot_backend.models import VoiceCommandResponse
+from deskpilot_backend.notes import NoteStore
 from deskpilot_backend.speech import SpeechEngineFactory
 from deskpilot_backend.transcription import (
     EmptyAudioError,
@@ -36,6 +37,7 @@ class NativeVoiceCommandService:
     launcher: ProcessLauncher | None = None
     key_event_sender: KeyEventSender | None = None
     system_status_reader: SystemStatusReader | None = None
+    note_store: NoteStore | None = None
     speech_engine_factory: SpeechEngineFactory | None = None
 
     def run(self) -> VoiceCommandResponse:
@@ -50,6 +52,7 @@ class NativeVoiceCommandService:
                 launcher=self.launcher,
                 key_event_sender=self.key_event_sender,
                 system_status_reader=self.system_status_reader,
+                note_store=self.note_store,
                 speech_engine_factory=self.speech_engine_factory,
             )
         except (

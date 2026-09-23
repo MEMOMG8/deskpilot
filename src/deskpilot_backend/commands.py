@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from deskpilot_backend.models import CommandAction, CommandResponse
+from deskpilot_backend.notes import MAX_NOTE_TEXT_LENGTH
 
 TERMINAL_PUNCTUATION = ".,!?"
 MAX_SEARCH_QUERY_LENGTH = 120
@@ -18,7 +19,9 @@ HELP_MESSAGE = (
     "next song; next track; previous song; previous track; open downloads; "
     "open documents; open desktop; open task manager; battery status; "
     "what is my battery level; memory status; how much memory am I using; "
-    "disk space; how much disk space do I have; help; what can you do."
+    "disk space; how much disk space do I have; take a note remember this; "
+    "note remember this; read latest note; how many notes do I have; "
+    "open notes folder; help; what can you do."
 )
 
 
@@ -85,6 +88,13 @@ SYSTEM_STATUS_COMMANDS = {
     "how much disk space do i have": "disk",
 }
 
+NOTE_COMMANDS = {
+    "read latest note": "read_latest",
+    "how many notes do i have": "count",
+    "open notes folder": "open_folder",
+}
+NOTE_COMMAND_PREFIXES = ("take a note", "note")
+
 TIME_COMMANDS = {"what time is it", "what's the time"}
 DATE_COMMANDS = {"what is the date", "what's today's date"}
 HELP_COMMANDS = {"help", "what can you do"}
@@ -105,6 +115,10 @@ def route_command(
     *,
     now_factory: Callable[[], datetime] = datetime.now,
 ) -> CommandResponse:
+    note_response = _route_note_command(text)
+    if note_response is not None:
+        return note_response
+
     normalized_text = normalize_command_text(text)
 
     if normalized_text in APPLICATION_COMMANDS:
@@ -175,6 +189,15 @@ def route_command(
             ),
         )
 
+    if normalized_text in NOTE_COMMANDS:
+        return CommandResponse(
+            intent="notes",
+            status="planned",
+            requires_confirmation=False,
+            action=CommandAction(type="note", target=NOTE_COMMANDS[normalized_text]),
+            message="Notes command was recognized, but DeskPilot will not run it yet.",
+        )
+
     if normalized_text in TIME_COMMANDS:
         return CommandResponse(
             intent="get_time",
@@ -205,6 +228,47 @@ def route_command(
         requires_confirmation=False,
         message="That command is not supported yet.",
     )
+
+
+def _route_note_command(text: str) -> CommandResponse | None:
+    stripped_text = text.strip()
+    casefolded_text = stripped_text.casefold()
+
+    for prefix in NOTE_COMMAND_PREFIXES:
+        if casefolded_text == prefix:
+            raise CommandValidationError("Note text must not be empty.")
+
+        prefix_with_space = f"{prefix} "
+        if casefolded_text.startswith(prefix_with_space):
+            raw_note_text = stripped_text[len(prefix_with_space) :]
+            note_text = _normalize_note_text(raw_note_text)
+            _validate_note_text(raw_note_text, note_text)
+            return CommandResponse(
+                intent="notes",
+                status="planned",
+                requires_confirmation=False,
+                action=CommandAction(type="note", target="create", query=note_text),
+                message="Note was recognized, but DeskPilot will not save it yet.",
+            )
+
+    return None
+
+
+def _normalize_note_text(note_text: str) -> str:
+    return re.sub(r"\s+", " ", note_text.strip())
+
+
+def _validate_note_text(raw_note_text: str, normalized_note_text: str) -> None:
+    if not normalized_note_text:
+        raise CommandValidationError("Note text must not be empty.")
+
+    if len(normalized_note_text) > MAX_NOTE_TEXT_LENGTH:
+        raise CommandValidationError("Note text is too long.")
+
+    if any(_is_control_character(character) for character in raw_note_text):
+        raise CommandValidationError(
+            "Note text contains unsupported control characters."
+        )
 
 
 def _route_search_command(

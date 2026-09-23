@@ -19,10 +19,12 @@ from deskpilot_backend.actions import (
 from deskpilot_backend.main import (
     app,
     get_key_event_sender,
+    get_note_store,
     get_process_launcher,
     get_system_status_reader,
 )
 from deskpilot_backend.models import ActionExecutionRequest
+from deskpilot_backend.notes import NoteStore, format_latest_note, format_note_count
 
 
 class RecordingLauncher:
@@ -269,6 +271,135 @@ def test_status_formatters_return_concise_spoken_values() -> None:
     )
 
 
+def test_note_create_action_writes_new_utf8_file_in_fixed_store(
+    tmp_path,
+) -> None:
+    note_store = NoteStore(tmp_path / "notes")
+    action = ActionExecutionRequest(type="note", target="create", query="Buy milk.")
+
+    response = execute_action(action, note_store=note_store)
+
+    note_files = list(note_store.notes_directory.glob("*.txt"))
+    assert response.executed is True
+    assert response.message == "Note saved."
+    assert len(note_files) == 1
+    assert note_files[0].parent == note_store.notes_directory
+    assert note_files[0].read_text(encoding="utf-8") == "Buy milk.\n"
+
+
+def test_note_create_action_never_overwrites_existing_note(tmp_path) -> None:
+    note_store = NoteStore(tmp_path / "notes")
+
+    execute_action(
+        ActionExecutionRequest(type="note", target="create", query="First note."),
+        note_store=note_store,
+    )
+    execute_action(
+        ActionExecutionRequest(type="note", target="create", query="Second note."),
+        note_store=note_store,
+    )
+
+    note_files = list(note_store.notes_directory.glob("*.txt"))
+    assert len(note_files) == 2
+    assert sorted(path.read_text(encoding="utf-8").strip() for path in note_files) == [
+        "First note.",
+        "Second note.",
+    ]
+
+
+def test_note_read_latest_action_reads_newest_note(tmp_path) -> None:
+    note_store = NoteStore(tmp_path / "notes")
+
+    execute_action(
+        ActionExecutionRequest(type="note", target="create", query="Older note."),
+        note_store=note_store,
+    )
+    execute_action(
+        ActionExecutionRequest(type="note", target="create", query="Newest note."),
+        note_store=note_store,
+    )
+
+    response = execute_action(
+        ActionExecutionRequest(type="note", target="read_latest"),
+        note_store=note_store,
+    )
+
+    assert response.message == "Latest note: Newest note."
+
+
+def test_note_read_latest_action_handles_no_notes(tmp_path) -> None:
+    response = execute_action(
+        ActionExecutionRequest(type="note", target="read_latest"),
+        note_store=NoteStore(tmp_path / "notes"),
+    )
+
+    assert response.message == "You do not have any notes yet."
+
+
+def test_note_count_action_reports_count_only(tmp_path) -> None:
+    note_store = NoteStore(tmp_path / "notes")
+    execute_action(
+        ActionExecutionRequest(type="note", target="create", query="One."),
+        note_store=note_store,
+    )
+
+    response = execute_action(
+        ActionExecutionRequest(type="note", target="count"),
+        note_store=note_store,
+    )
+
+    assert response.message == "You have 1 note."
+
+
+def test_note_open_folder_action_opens_only_store_directory(tmp_path) -> None:
+    launcher = RecordingLauncher()
+    note_store = NoteStore(tmp_path / "notes")
+
+    response = execute_action(
+        ActionExecutionRequest(type="note", target="open_folder"),
+        launcher=launcher,
+        note_store=note_store,
+    )
+
+    assert response.message == "Opening notes folder."
+    assert launcher.commands == [["explorer.exe", str(note_store.notes_directory)]]
+    assert note_store.notes_directory.exists()
+
+
+@pytest.mark.parametrize(
+    ("query", "message"),
+    [
+        (None, "Note text must not be empty."),
+        ("", "Note text must not be empty."),
+        ("line\nbreak", "Note text contains unsupported control characters."),
+        ("a" * 1001, "Note text is too long."),
+    ],
+)
+def test_invalid_note_text_is_rejected_without_writing_file(
+    tmp_path,
+    query: str | None,
+    message: str,
+) -> None:
+    note_store = NoteStore(tmp_path / "notes")
+
+    with pytest.raises(UnsupportedActionError, match=message):
+        execute_action(
+            ActionExecutionRequest(type="note", target="create", query=query),
+            note_store=note_store,
+        )
+
+    assert note_store.count_notes() == 0
+
+
+def test_note_formatters_keep_latest_note_reasonably_short() -> None:
+    long_note = "a" * 600
+
+    assert format_latest_note(None) == "You do not have any notes yet."
+    assert format_latest_note(long_note) == f"Latest note: {'a' * 500}..."
+    assert format_note_count(0) == "You have 0 notes."
+    assert format_note_count(2) == "You have 2 notes."
+
+
 def test_media_key_rejects_unsupported_platform_without_succeeding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -372,6 +503,16 @@ def test_unsupported_search_target_is_rejected_and_never_opens_browser() -> None
         execute_action(action, launcher=launcher)
 
     assert launcher.commands == []
+
+
+def test_unsupported_note_target_is_rejected_and_never_writes_file(tmp_path) -> None:
+    note_store = NoteStore(tmp_path / "notes")
+    action = ActionExecutionRequest(type="note", target="delete")
+
+    with pytest.raises(UnsupportedActionError, match="Unsupported action target"):
+        execute_action(action, note_store=note_store)
+
+    assert note_store.count_notes() == 0
 
 
 @pytest.mark.parametrize(
@@ -480,3 +621,21 @@ def test_actions_execute_endpoint_uses_mocked_browser_launcher() -> None:
             "https://www.google.com/search?q=deskpilot+test",
         ]
     ]
+
+
+def test_actions_execute_endpoint_uses_temp_note_store(tmp_path) -> None:
+    note_store = NoteStore(tmp_path / "notes")
+    client = TestClient(app)
+    app.dependency_overrides[get_note_store] = lambda: note_store
+
+    try:
+        response = client.post(
+            "/api/v1/actions/execute",
+            json={"type": "note", "target": "create", "query": "Local note."},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Note saved."
+    assert note_store.count_notes() == 1

@@ -9,6 +9,13 @@ from shutil import disk_usage
 from urllib.parse import urlencode
 
 from deskpilot_backend.models import ActionExecutionRequest, ActionExecutionResponse
+from deskpilot_backend.notes import (
+    MAX_NOTE_TEXT_LENGTH,
+    NoteStore,
+    NoteStoreError,
+    format_latest_note,
+    format_note_count,
+)
 
 OPEN_APP_ACTION_TYPE = "open_app"
 MEDIA_KEY_ACTION_TYPE = "media_key"
@@ -16,6 +23,7 @@ WORKSPACE_SHORTCUT_ACTION_TYPE = "workspace_shortcut"
 SYSTEM_STATUS_ACTION_TYPE = "system_status"
 OPEN_URL_ACTION_TYPE = "open_url"
 WEB_SEARCH_ACTION_TYPE = "web_search"
+NOTE_ACTION_TYPE = "note"
 MAX_SEARCH_QUERY_LENGTH = 120
 KEYEVENTF_KEYUP = 0x0002
 VK_VOLUME_MUTE = 0xAD
@@ -41,6 +49,7 @@ class ActionDefinition:
     url: str | None = None
     search_url: str | None = None
     query_message_prefix: str | None = None
+    note_operation: str | None = None
     unsupported_platform_message: str | None = None
 
 
@@ -181,6 +190,27 @@ ACTION_REGISTRY = {
         query_message_prefix="Searching GitHub for",
         message="Searching GitHub.",
     ),
+    (NOTE_ACTION_TYPE, "create"): ActionDefinition(
+        action_type=NOTE_ACTION_TYPE,
+        note_operation="create",
+        message="Note saved.",
+    ),
+    (NOTE_ACTION_TYPE, "read_latest"): ActionDefinition(
+        action_type=NOTE_ACTION_TYPE,
+        note_operation="read_latest",
+        message="Reading latest note.",
+    ),
+    (NOTE_ACTION_TYPE, "count"): ActionDefinition(
+        action_type=NOTE_ACTION_TYPE,
+        note_operation="count",
+        message="Counting notes.",
+    ),
+    (NOTE_ACTION_TYPE, "open_folder"): ActionDefinition(
+        action_type=NOTE_ACTION_TYPE,
+        note_operation="open_folder",
+        message="Opening notes folder.",
+        unsupported_platform_message="Notes folder opening is only supported on Windows.",
+    ),
 }
 SUPPORTED_ACTION_TYPES = {action_type for action_type, _target in ACTION_REGISTRY}
 
@@ -194,6 +224,7 @@ def execute_action(
     launcher: ProcessLauncher | None = None,
     key_event_sender: KeyEventSender | None = None,
     system_status_reader: SystemStatusReader | None = None,
+    note_store: NoteStore | None = None,
 ) -> ActionExecutionResponse:
     if action.type not in SUPPORTED_ACTION_TYPES:
         raise UnsupportedActionError(f"Unsupported action type: {action.type}")
@@ -230,6 +261,13 @@ def execute_action(
         search_url = build_search_url(action_definition.search_url, query)
         open_trusted_url(search_url, launcher=launcher)
         message = f"{action_definition.query_message_prefix} {query}."
+    elif action_definition.note_operation is not None:
+        message = execute_note_operation(
+            action_definition.note_operation,
+            action,
+            note_store=note_store,
+            launcher=launcher,
+        )
 
     return ActionExecutionResponse(
         status="executed",
@@ -237,6 +275,56 @@ def execute_action(
         action=action,
         message=message,
     )
+
+
+def execute_note_operation(
+    operation: str,
+    action: ActionExecutionRequest,
+    *,
+    note_store: NoteStore | None = None,
+    launcher: ProcessLauncher | None = None,
+) -> str:
+    store = note_store or NoteStore()
+
+    try:
+        if operation == "create":
+            note_text = validate_note_text(action.query)
+            store.create_note(note_text)
+            return "Note saved."
+
+        if operation == "read_latest":
+            return format_latest_note(store.read_latest_note())
+
+        if operation == "count":
+            return format_note_count(store.count_notes())
+
+        if operation == "open_folder":
+            notes_directory = store.ensure_directory()
+            process_launcher = launcher or subprocess.Popen
+            process_launcher(["explorer.exe", str(notes_directory)])
+            return "Opening notes folder."
+    except NoteStoreError as error:
+        raise UnsupportedActionError(str(error)) from error
+    except OSError as error:
+        raise UnsupportedActionError("Local notes are unavailable.") from error
+
+    raise UnsupportedActionError(f"Unsupported note operation: {operation}")
+
+
+def validate_note_text(note_text: str | None) -> str:
+    if note_text is None or not note_text.strip():
+        raise UnsupportedActionError("Note text must not be empty.")
+
+    normalized_text = " ".join(note_text.split())
+    if len(normalized_text) > MAX_NOTE_TEXT_LENGTH:
+        raise UnsupportedActionError("Note text is too long.")
+
+    if any(_is_control_character(character) for character in note_text):
+        raise UnsupportedActionError(
+            "Note text contains unsupported control characters."
+        )
+
+    return normalized_text
 
 
 def open_trusted_url(
