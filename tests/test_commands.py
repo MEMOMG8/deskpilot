@@ -4,8 +4,8 @@ from deskpilot_backend.commands import route_command
 from deskpilot_backend.main import app
 
 
-def test_open_calculator_is_recognized() -> None:
-    response = route_command("open calculator")
+def assert_calculator_action_is_recognized(text: str) -> None:
+    response = route_command(text)
 
     assert response.model_dump(exclude_none=True) == {
         "intent": "open_app",
@@ -14,6 +14,18 @@ def test_open_calculator_is_recognized() -> None:
         "action": {"type": "open_app", "target": "calculator"},
         "message": "Calculator was recognized, but DeskPilot will not launch apps yet.",
     }
+
+
+def test_open_calculator_is_recognized() -> None:
+    assert_calculator_action_is_recognized("open calculator")
+
+
+def test_open_calculator_with_capitalization_and_period_is_recognized() -> None:
+    assert_calculator_action_is_recognized("Open calculator.")
+
+
+def test_open_calculator_with_extra_whitespace_case_and_punctuation_is_recognized() -> None:
+    assert_calculator_action_is_recognized("  OPEN   CALCULATOR!  ")
 
 
 def test_commands_endpoint_returns_calculator_plan() -> None:
@@ -37,6 +49,13 @@ def test_open_calculator_ignores_case_and_surrounding_whitespace() -> None:
     assert response.intent == "open_app"
     assert response.action is not None
     assert response.action.target == "calculator"
+
+
+def test_open_calculator_please_remains_unsupported() -> None:
+    response = route_command("open calculator please")
+
+    assert response.intent == "unknown"
+    assert response.status == "not_supported"
 
 
 def test_help_is_recognized() -> None:

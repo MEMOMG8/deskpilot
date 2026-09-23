@@ -1,8 +1,17 @@
+import re
+
 from deskpilot_backend.models import CommandAction, CommandResponse
+
+TERMINAL_PUNCTUATION = ".,!?"
+
+
+def normalize_command_text(text: str) -> str:
+    normalized_text = text.strip().casefold().rstrip(TERMINAL_PUNCTUATION)
+    return re.sub(r"\s+", " ", normalized_text).strip()
 
 
 def route_command(text: str) -> CommandResponse:
-    normalized_text = text.strip().casefold()
+    normalized_text = normalize_command_text(text)
 
     if normalized_text == "open calculator":
         return CommandResponse(
