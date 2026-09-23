@@ -39,3 +39,9 @@ Then visit `http://127.0.0.1:8000/api/v1/health`.
 ```powershell
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/speech/speak -ContentType 'application/json' -Body '{"text":"Hello Manuel, DeskPilot is ready."}' | ConvertTo-Json -Depth 5
 ```
+
+## Manual Assistant Narration Check
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/assistant/commands -ContentType 'application/json' -Body '{"text":"open calculator","speak":true}' | ConvertTo-Json -Depth 5
+```

@@ -44,7 +44,14 @@ class AssistantCommandResponse(BaseModel):
     status: Literal["executed", "completed", "not_supported"]
     requires_confirmation: bool
     message: str
+    speech_result: Literal["not_requested", "completed", "unavailable"] = (
+        "not_requested"
+    )
     action: CommandAction | None = None
+
+
+class AssistantCommandRequest(CommandRequest):
+    speak: bool = False
 
 
 class SpeechRequest(BaseModel):

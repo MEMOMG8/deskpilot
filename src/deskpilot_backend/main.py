@@ -6,6 +6,7 @@ from deskpilot_backend.commands import route_command
 from deskpilot_backend.models import (
     ActionExecutionRequest,
     ActionExecutionResponse,
+    AssistantCommandRequest,
     AssistantCommandResponse,
     CommandRequest,
     CommandResponse,
@@ -55,11 +56,18 @@ def execute_planned_action(
     response_model_exclude_none=True,
 )
 def create_assistant_command(
-    command: CommandRequest,
+    command: AssistantCommandRequest,
     process_launcher: ProcessLauncher | None = Depends(get_process_launcher),
+    speech_engine_factory: SpeechEngineFactory | None = Depends(
+        get_speech_engine_factory
+    ),
 ) -> AssistantCommandResponse:
     try:
-        return handle_assistant_command(command, launcher=process_launcher)
+        return handle_assistant_command(
+            command,
+            launcher=process_launcher,
+            speech_engine_factory=speech_engine_factory,
+        )
     except UnsupportedActionError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
