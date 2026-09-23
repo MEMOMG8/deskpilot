@@ -10,9 +10,11 @@ from deskpilot_backend.desktop_state import (
 )
 from deskpilot_backend.desktop_voice import (
     NativeVoiceCommandService,
+    apply_native_voice_preferences,
     run_native_voice_handoff,
 )
 from deskpilot_backend.reminders import ReminderService
+from deskpilot_backend.settings import DeskPilotSettings, SettingsStore, SettingsStoreError
 from deskpilot_backend.wake_word import WakeWordError, WakeWordService
 
 LOGGER = logging.getLogger(__name__)
@@ -143,6 +145,13 @@ def main() -> int:
     native_command_state = NativeWakeWordCommandController()
     overlay = ListeningOverlay()
     signals = DesktopSignals()
+    settings_store = SettingsStore()
+    try:
+        deskpilot_settings = settings_store.load_or_create()
+    except SettingsStoreError as error:
+        LOGGER.warning("DeskPilot settings could not be created: %s", error)
+        deskpilot_settings = DeskPilotSettings(warnings=(str(error),))
+
     visual_controller = WakeWordVisualController(
         state=state,
         show_border=overlay.show_state,
@@ -297,7 +306,12 @@ def main() -> int:
     reminder_service = ReminderService(notifier=signals.reminder_due.emit)
     native_voice_service = NativeVoiceCommandService(
         reminder_service=reminder_service,
+        settings_store=settings_store,
         on_processing_started=signals.native_command_processing.emit,
+    )
+    start_wake_on_startup = apply_native_voice_preferences(
+        native_voice_service,
+        deskpilot_settings,
     )
 
     show_action.triggered.connect(show_border)
@@ -322,6 +336,13 @@ def main() -> int:
     tray.setContextMenu(menu)
     update_tray_state()
     tray.show()
+
+    for warning in deskpilot_settings.warnings:
+        LOGGER.warning("DeskPilot settings warning: %s", warning)
+        tray.showMessage("DeskPilot settings", warning)
+
+    if start_wake_on_startup:
+        start_wake_word()
 
     return app.exec()
 

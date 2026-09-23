@@ -21,6 +21,7 @@ from deskpilot_backend.reminders import (
     ReminderService,
     ReminderStoreError,
 )
+from deskpilot_backend.settings import SettingsStore, SettingsStoreError
 
 OPEN_APP_ACTION_TYPE = "open_app"
 MEDIA_KEY_ACTION_TYPE = "media_key"
@@ -30,6 +31,7 @@ OPEN_URL_ACTION_TYPE = "open_url"
 WEB_SEARCH_ACTION_TYPE = "web_search"
 NOTE_ACTION_TYPE = "note"
 REMINDER_ACTION_TYPE = "reminder"
+DESKPILOT_SETTINGS_ACTION_TYPE = "deskpilot_settings"
 MAX_SEARCH_QUERY_LENGTH = 120
 KEYEVENTF_KEYUP = 0x0002
 VK_VOLUME_MUTE = 0xAD
@@ -57,6 +59,7 @@ class ActionDefinition:
     query_message_prefix: str | None = None
     note_operation: str | None = None
     reminder_operation: str | None = None
+    settings_operation: str | None = None
     unsupported_platform_message: str | None = None
 
 
@@ -228,6 +231,11 @@ ACTION_REGISTRY = {
         reminder_operation="list",
         message="Listing reminders.",
     ),
+    (DESKPILOT_SETTINGS_ACTION_TYPE, "open_file"): ActionDefinition(
+        action_type=DESKPILOT_SETTINGS_ACTION_TYPE,
+        settings_operation="open_file",
+        message="Opening DeskPilot settings.",
+    ),
 }
 SUPPORTED_ACTION_TYPES = {action_type for action_type, _target in ACTION_REGISTRY}
 
@@ -243,6 +251,7 @@ def execute_action(
     system_status_reader: SystemStatusReader | None = None,
     note_store: NoteStore | None = None,
     reminder_service: ReminderService | None = None,
+    settings_store: SettingsStore | None = None,
 ) -> ActionExecutionResponse:
     if action.type not in SUPPORTED_ACTION_TYPES:
         raise UnsupportedActionError(f"Unsupported action type: {action.type}")
@@ -292,6 +301,12 @@ def execute_action(
             action,
             reminder_service=reminder_service,
         )
+    elif action_definition.settings_operation is not None:
+        message = execute_settings_operation(
+            action_definition.settings_operation,
+            settings_store=settings_store,
+            launcher=launcher,
+        )
 
     return ActionExecutionResponse(
         status="executed",
@@ -299,6 +314,28 @@ def execute_action(
         action=action,
         message=message,
     )
+
+
+def execute_settings_operation(
+    operation: str,
+    *,
+    settings_store: SettingsStore | None = None,
+    launcher: ProcessLauncher | None = None,
+) -> str:
+    store = settings_store or SettingsStore()
+
+    try:
+        if operation == "open_file":
+            settings_file = store.ensure_settings_file()
+            process_launcher = launcher or subprocess.Popen
+            process_launcher(["notepad.exe", str(settings_file)])
+            return "Opening DeskPilot settings."
+    except SettingsStoreError as error:
+        raise UnsupportedActionError(str(error)) from error
+    except OSError as error:
+        raise UnsupportedActionError("DeskPilot settings are unavailable.") from error
+
+    raise UnsupportedActionError(f"Unsupported settings operation: {operation}")
 
 
 def execute_reminder_operation(

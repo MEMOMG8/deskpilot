@@ -38,7 +38,7 @@ python -m deskpilot_backend.desktop
 
 DeskPilot starts in the Windows system tray. Use the tray menu to choose `Show listening border`, `Hide border`, `Start wake word listening`, `Stop wake word listening`, or `Quit DeskPilot`. Wake-word listening is off by default.
 
-For the native end-to-end demo, choose `Start wake word listening`, say "Hey Jarvis", then speak "open calculator" while the cyan listening border is visible. DeskPilot plays a short local Windows cue when command recording begins, stops the wake-word microphone stream, records one fixed 4-second local command, transcribes it locally, runs the existing allowlisted assistant action flow, narrates the response with local TTS, hides the border, and resumes wake-word listening if it is still enabled.
+For the native end-to-end demo, choose `Start wake word listening`, say "Hey Jarvis", then speak "open calculator" while the cyan listening border is visible. DeskPilot plays a short local Windows cue when command recording begins, stops the wake-word microphone stream, records one short local command, transcribes it locally, runs the existing allowlisted assistant action flow, narrates the response with local TTS, hides the border, and resumes wake-word listening if it is still enabled.
 
 Native voice states:
 
@@ -48,6 +48,34 @@ Native voice states:
 - Red: recoverable error or unknown command, then hides
 
 The first wake-word start may download/cache openWakeWord's local `hey_jarvis` model. openWakeWord code is Apache-2.0 licensed, while its included pre-trained models are licensed CC BY-NC-SA 4.0.
+
+## Local Settings
+
+DeskPilot stores local preferences in `~/Documents/DeskPilot/settings.json`. The file is created only when missing, using this schema:
+
+```json
+{
+  "version": 1,
+  "command_capture_duration_seconds": 4,
+  "recording_start_cue_enabled": true,
+  "wake_listening_on_startup": false,
+  "custom_aliases": {}
+}
+```
+
+`command_capture_duration_seconds` is allowed from `2` through `8`; invalid values fall back to `4`. `recording_start_cue_enabled` controls the local Windows cue before native command recording. `wake_listening_on_startup` starts wake-word listening when the tray shell opens.
+
+Custom aliases map one fixed phrase to an existing fixed command ID, for example:
+
+```json
+{
+  "custom_aliases": {
+    "open my projects": "open github"
+  }
+}
+```
+
+Aliases cannot replace built-in commands, collide after normalization, or point to executables, paths, URLs, shell commands, media controls, notes, reminders, or parameterized searches. Invalid settings are not rewritten; DeskPilot uses safe defaults and shows a local warning.
 
 ## API Endpoints
 
@@ -71,6 +99,10 @@ Application commands:
 - `open settings`
 - `open browser`
 - `open task manager`
+
+Settings commands:
+
+- `open deskpilot settings`
 
 Fixed-site commands:
 

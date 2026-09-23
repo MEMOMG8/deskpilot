@@ -12,11 +12,13 @@ from deskpilot_backend.main import (
     get_note_store,
     get_process_launcher,
     get_reminder_service,
+    get_settings_store,
     get_speech_engine_factory,
     get_system_status_reader,
 )
 from deskpilot_backend.notes import NoteStore
 from deskpilot_backend.reminders import ReminderService
+from deskpilot_backend.settings import SettingsStore
 
 
 class RecordingLauncher:
@@ -85,6 +87,7 @@ def mocked_dependencies(
     system_status_reader: RecordingSystemStatusReader | None = None,
     note_store: NoteStore | None = None,
     reminder_service: ReminderService | None = None,
+    settings_store: SettingsStore | None = None,
     speech_engine_factory: object | None = None,
 ) -> Iterator[None]:
     if launcher is not None:
@@ -103,6 +106,9 @@ def mocked_dependencies(
 
     if reminder_service is not None:
         app.dependency_overrides[get_reminder_service] = lambda: reminder_service
+
+    if settings_store is not None:
+        app.dependency_overrides[get_settings_store] = lambda: settings_store
 
     if speech_engine_factory is not None:
         app.dependency_overrides[get_speech_engine_factory] = (
@@ -583,6 +589,29 @@ def test_assistant_note_read_latest_handles_empty_store(tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.json()["message"] == "You do not have any notes yet."
+
+
+def test_assistant_open_deskpilot_settings_uses_fixed_settings_file(tmp_path) -> None:
+    launcher = RecordingLauncher()
+    settings_store = SettingsStore(tmp_path / "settings.json")
+    client = TestClient(app)
+
+    with mocked_dependencies(launcher=launcher, settings_store=settings_store):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "open deskpilot settings"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "settings",
+        "status": "executed",
+        "requires_confirmation": False,
+        "message": "Opening DeskPilot settings.",
+        "speech_result": "not_requested",
+        "action": {"type": "deskpilot_settings", "target": "open_file"},
+    }
+    assert launcher.commands == [["notepad.exe", str(settings_store.settings_file)]]
 
 
 def test_assistant_note_with_speak_narrates_existing_tts_response(tmp_path) -> None:

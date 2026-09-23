@@ -24,6 +24,7 @@ class CommandAction(BaseModel):
         "web_search",
         "note",
         "reminder",
+        "deskpilot_settings",
     ]
     target: Literal[
         "calculator",
@@ -53,6 +54,7 @@ class CommandAction(BaseModel):
         "count",
         "open_folder",
         "list",
+        "open_file",
     ]
     query: str | None = None
     minutes: int | None = None
@@ -68,6 +70,7 @@ class CommandResponse(BaseModel):
         "web_search",
         "notes",
         "reminders",
+        "settings",
         "get_time",
         "get_date",
         "cancel",
@@ -104,6 +107,7 @@ class AssistantCommandResponse(BaseModel):
         "web_search",
         "notes",
         "reminders",
+        "settings",
         "get_time",
         "get_date",
         "cancel",

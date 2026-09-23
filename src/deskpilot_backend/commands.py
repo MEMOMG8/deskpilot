@@ -1,5 +1,5 @@
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -24,7 +24,8 @@ HELP_MESSAGE = (
     "note remember this; read latest note; how many notes do I have; "
     "open notes folder; remind me in one minute to stretch; "
     "remind me in 10 minutes to stretch; list reminders; "
-    "what are my reminders; cancel; never mind; help; what can you do."
+    "what are my reminders; open deskpilot settings; "
+    "cancel; never mind; help; what can you do."
 )
 
 
@@ -97,6 +98,7 @@ NOTE_COMMANDS = {
     "open notes folder": "open_folder",
 }
 NOTE_COMMAND_PREFIXES = ("take a note", "note")
+DESKPILOT_SETTINGS_COMMANDS = {"open deskpilot settings"}
 REMINDER_COMMANDS = {"list reminders", "what are my reminders"}
 REMINDER_COMMAND_PATTERN = re.compile(
     r"^remind\s+me\s+in\s+(.+?)\s+minutes?\s+to(?:\s+|$)",
@@ -162,7 +164,15 @@ def route_command(
     text: str,
     *,
     now_factory: Callable[[], datetime] = datetime.now,
+    custom_aliases: Mapping[str, str] | None = None,
 ) -> CommandResponse:
+    normalized_text = normalize_command_text(text)
+    if custom_aliases and normalized_text in custom_aliases:
+        return route_command(
+            custom_aliases[normalized_text],
+            now_factory=now_factory,
+        )
+
     note_response = _route_note_command(text)
     if note_response is not None:
         return note_response
@@ -170,8 +180,6 @@ def route_command(
     reminder_response = _route_reminder_command(text)
     if reminder_response is not None:
         return reminder_response
-
-    normalized_text = normalize_command_text(text)
 
     if normalized_text in APPLICATION_COMMANDS:
         command = APPLICATION_COMMANDS[normalized_text]
@@ -248,6 +256,18 @@ def route_command(
             requires_confirmation=False,
             action=CommandAction(type="note", target=NOTE_COMMANDS[normalized_text]),
             message="Notes command was recognized, but DeskPilot will not run it yet.",
+        )
+
+    if normalized_text in DESKPILOT_SETTINGS_COMMANDS:
+        return CommandResponse(
+            intent="settings",
+            status="planned",
+            requires_confirmation=False,
+            action=CommandAction(type="deskpilot_settings", target="open_file"),
+            message=(
+                "DeskPilot settings were recognized, "
+                "but DeskPilot will not open them yet."
+            ),
         )
 
     if normalized_text in REMINDER_COMMANDS:

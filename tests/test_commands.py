@@ -378,6 +378,21 @@ def test_note_management_commands_are_recognized(text: str, target: str) -> None
     }
 
 
+def test_open_deskpilot_settings_command_is_recognized() -> None:
+    response = route_command("open deskpilot settings")
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "settings",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "deskpilot_settings", "target": "open_file"},
+        "message": (
+            "DeskPilot settings were recognized, "
+            "but DeskPilot will not open them yet."
+        ),
+    }
+
+
 @pytest.mark.parametrize(
     ("text", "message"),
     [

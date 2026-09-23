@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -22,11 +24,13 @@ from deskpilot_backend.main import (
     get_note_store,
     get_process_launcher,
     get_reminder_service,
+    get_settings_store,
     get_system_status_reader,
 )
 from deskpilot_backend.models import ActionExecutionRequest
 from deskpilot_backend.notes import NoteStore, format_latest_note, format_note_count
 from deskpilot_backend.reminders import ReminderService
+from deskpilot_backend.settings import SettingsStore, default_settings_data
 
 
 class RecordingLauncher:
@@ -422,6 +426,26 @@ def test_note_formatters_keep_latest_note_reasonably_short() -> None:
     assert format_note_count(2) == "You have 2 notes."
 
 
+def test_open_deskpilot_settings_action_creates_file_and_opens_notepad(tmp_path) -> None:
+    launcher = RecordingLauncher()
+    settings_store = SettingsStore(tmp_path / "settings.json")
+    action = ActionExecutionRequest(type="deskpilot_settings", target="open_file")
+
+    response = execute_action(
+        action,
+        launcher=launcher,
+        settings_store=settings_store,
+    )
+
+    assert response.executed is True
+    assert response.message == "Opening DeskPilot settings."
+    assert settings_store.settings_file.exists()
+    assert json.loads(settings_store.settings_file.read_text(encoding="utf-8")) == (
+        default_settings_data()
+    )
+    assert launcher.commands == [["notepad.exe", str(settings_store.settings_file)]]
+
+
 def test_reminder_create_action_persists_and_schedules_temp_reminder(tmp_path) -> None:
     timers = FakeTimerFactory()
     reminder_service = ReminderService(
@@ -628,6 +652,18 @@ def test_unsupported_reminder_target_is_rejected_and_never_schedules(tmp_path) -
     assert timers.timers == []
 
 
+def test_unsupported_settings_target_is_rejected_and_never_opens_file(tmp_path) -> None:
+    launcher = RecordingLauncher()
+    settings_store = SettingsStore(tmp_path / "settings.json")
+    action = ActionExecutionRequest(type="deskpilot_settings", target="delete")
+
+    with pytest.raises(UnsupportedActionError, match="Unsupported action target"):
+        execute_action(action, launcher=launcher, settings_store=settings_store)
+
+    assert launcher.commands == []
+    assert not settings_store.settings_file.exists()
+
+
 @pytest.mark.parametrize(
     ("query", "message"),
     [
@@ -778,3 +814,24 @@ def test_actions_execute_endpoint_uses_temp_reminder_service(tmp_path) -> None:
     assert response.status_code == 200
     assert response.json()["message"] == "Reminder set for 5 minutes from now."
     assert len(reminder_service.list_pending_reminders()) == 1
+
+
+def test_actions_execute_endpoint_uses_temp_settings_store(tmp_path) -> None:
+    launcher = RecordingLauncher()
+    settings_store = SettingsStore(tmp_path / "settings.json")
+    client = TestClient(app)
+    app.dependency_overrides[get_process_launcher] = lambda: launcher
+    app.dependency_overrides[get_settings_store] = lambda: settings_store
+
+    try:
+        response = client.post(
+            "/api/v1/actions/execute",
+            json={"type": "deskpilot_settings", "target": "open_file"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Opening DeskPilot settings."
+    assert settings_store.settings_file.exists()
+    assert launcher.commands == [["notepad.exe", str(settings_store.settings_file)]]

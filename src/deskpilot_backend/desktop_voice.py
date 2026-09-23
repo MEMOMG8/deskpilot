@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from deskpilot_backend.actions import (
@@ -12,6 +12,7 @@ from deskpilot_backend.microphone import AudioRecorder, MicrophoneError, record_
 from deskpilot_backend.models import VoiceCommandResponse
 from deskpilot_backend.notes import NoteStore
 from deskpilot_backend.reminders import ReminderService
+from deskpilot_backend.settings import DeskPilotSettings, SettingsStore
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
 from deskpilot_backend.transcription import (
     EmptyAudioError,
@@ -41,6 +42,10 @@ def play_recording_start_cue() -> None:
     winsound.MessageBeep(winsound.MB_ICONASTERISK)
 
 
+def skip_recording_start_cue() -> None:
+    return None
+
+
 @dataclass
 class NativeVoiceCommandService:
     transcription_service: WhisperTranscriptionService = field(
@@ -52,9 +57,12 @@ class NativeVoiceCommandService:
     system_status_reader: SystemStatusReader | None = None
     note_store: NoteStore | None = None
     reminder_service: ReminderService | None = None
+    settings_store: SettingsStore | None = None
     speech_engine_factory: SpeechEngineFactory | None = None
     cue_player: CuePlayer = play_recording_start_cue
     on_processing_started: ProgressCallback | None = None
+    capture_duration_seconds: int = NATIVE_COMMAND_DURATION_SECONDS
+    custom_aliases: Mapping[str, str] | None = None
 
     def run(self) -> VoiceCommandResponse:
         try:
@@ -63,7 +71,7 @@ class NativeVoiceCommandService:
             except Exception as error:
                 raise NativeVoiceCommandError("Recording cue is unavailable.") from error
 
-            audio_bytes = self.recorder(NATIVE_COMMAND_DURATION_SECONDS)
+            audio_bytes = self.recorder(self.capture_duration_seconds)
             if self.on_processing_started is not None:
                 self.on_processing_started()
 
@@ -78,6 +86,8 @@ class NativeVoiceCommandService:
                 system_status_reader=self.system_status_reader,
                 note_store=self.note_store,
                 reminder_service=self.reminder_service,
+                settings_store=self.settings_store,
+                custom_aliases=self.custom_aliases,
             )
             _narrate_native_response(response, self.speech_engine_factory)
             return response
@@ -93,6 +103,23 @@ class NativeVoiceCommandService:
             UnsupportedActionError,
         ) as error:
             raise NativeVoiceCommandError(str(error)) from error
+
+
+def apply_native_voice_preferences(
+    service: NativeVoiceCommandService,
+    settings: DeskPilotSettings,
+    *,
+    enabled_cue_player: CuePlayer = play_recording_start_cue,
+    disabled_cue_player: CuePlayer = skip_recording_start_cue,
+) -> bool:
+    service.capture_duration_seconds = settings.command_capture_duration_seconds
+    service.cue_player = (
+        enabled_cue_player
+        if settings.recording_start_cue_enabled
+        else disabled_cue_player
+    )
+    service.custom_aliases = settings.custom_aliases
+    return settings.wake_listening_on_startup
 
 
 def _narrate_native_response(
