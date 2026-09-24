@@ -11,7 +11,11 @@ from deskpilot_backend.desktop_voice import (
     NativeVoiceCommandService,
     run_native_voice_handoff,
 )
-from deskpilot_backend.microphone import MicrophoneError, encode_wav
+from deskpilot_backend.microphone import (
+    MicrophoneError,
+    NoSpeechDetectedError,
+    encode_wav,
+)
 from deskpilot_backend.models import TranscriptionResponse, VoiceCommandResponse
 
 
@@ -284,6 +288,39 @@ def test_native_voice_command_failure_recovery_can_resume_wake_word() -> None:
 
     assert controller.finish_command() is True
     assert controller.command_in_progress is False
+
+
+def test_native_voice_no_speech_feedback_skips_transcription_and_action() -> None:
+    class NoSpeechRecorder:
+        def __call__(self, duration_seconds: int) -> bytes:
+            raise NoSpeechDetectedError("I didn't hear a command.")
+
+    class MustNotTranscribe(FakeTranscriptionService):
+        def transcribe(
+            self,
+            audio_bytes: bytes,
+            *,
+            content_type: str | None,
+            filename: str | None = None,
+        ) -> TranscriptionResponse:
+            raise AssertionError("transcription should not run")
+
+    launcher = RecordingLauncher()
+    engine = FakeSpeechEngine()
+    service = NativeVoiceCommandService(
+        transcription_service=MustNotTranscribe(),
+        recorder=NoSpeechRecorder(),
+        launcher=launcher,
+        speech_engine_factory=lambda: engine,
+        cue_player=no_op_cue,
+    )
+
+    with pytest.raises(NativeVoiceCommandError) as error:
+        service.run()
+
+    assert str(error.value) == "I didn't hear a command."
+    assert launcher.commands == []
+    assert engine.spoken_text == ["I didn't hear a command."]
 
 
 def test_native_voice_handoff_stops_wake_word_before_recording() -> None:

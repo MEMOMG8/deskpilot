@@ -56,7 +56,9 @@ With the API running, open `http://127.0.0.1:8000`, click `Talk (4 seconds)`, an
 
 ## Native Voice Demo
 
-Start the tray app, choose `Start wake word listening`, say "Hey Jarvis", then speak a supported command while the cyan listening border is visible. DeskPilot plays a short local Windows cue when command recording begins, stops the wake-word microphone stream, records one local command, transcribes it locally, runs the allowlisted assistant flow, narrates the response with local TTS, hides the border, and resumes wake-word listening if it is still enabled.
+Start the tray app, choose `Start wake word listening`, say "Hey Jarvis", then speak a supported command while the cyan listening border is visible. DeskPilot plays a short local Windows cue when command listening begins, stops the wake-word microphone stream, waits locally for speech onset, keeps a small pre-roll, captures until short trailing silence, then sends only that bounded final command segment to the selected transcription provider. It runs the allowlisted assistant flow, narrates the response with local TTS, hides the border, and resumes wake-word listening if it is still enabled.
+
+If no speech is detected during the bounded initial listening window, DeskPilot does not transcribe anything and gives concise recoverable feedback: `I didn't hear a command.`
 
 Native voice states:
 
@@ -106,7 +108,7 @@ DeskPilot stores local preferences in `~/Documents/DeskPilot/settings.json`. The
 }
 ```
 
-`command_capture_duration_seconds` is allowed from `2` through `8`; invalid values fall back to `4`. `recording_start_cue_enabled` controls the local Windows cue before native command recording. `wake_listening_on_startup` starts wake-word listening when the tray shell opens.
+`command_capture_duration_seconds` is allowed from `2` through `8`; invalid values fall back to `4`. For native wake-word commands, this is the hard maximum adaptive endpointing duration, not a fixed recording length. `recording_start_cue_enabled` controls the local Windows cue before native command listening. `wake_listening_on_startup` starts wake-word listening when the tray shell opens.
 
 `voice_transcription_provider` controls only native wake-word command transcription:
 

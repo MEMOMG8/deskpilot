@@ -14,7 +14,12 @@ from deskpilot_backend.command_interpreter import (
     OpenAICommandInterpreter,
 )
 from deskpilot_backend.commands import CommandValidationError
-from deskpilot_backend.microphone import AudioRecorder, MicrophoneError, record_microphone_wav
+from deskpilot_backend.microphone import (
+    AudioRecorder,
+    MicrophoneError,
+    NoSpeechDetectedError,
+    record_adaptive_microphone_wav,
+)
 from deskpilot_backend.models import VoiceCommandResponse
 from deskpilot_backend.notes import NoteStore
 from deskpilot_backend.reminders import ReminderService
@@ -64,7 +69,7 @@ class NativeVoiceCommandService:
     transcription_service: TranscriptionService | None = None
     command_interpreter: CommandInterpreter | None = None
     clarification_store: ClarificationStore | None = None
-    recorder: AudioRecorder = record_microphone_wav
+    recorder: AudioRecorder = record_adaptive_microphone_wav
     launcher: ProcessLauncher | None = None
     key_event_sender: KeyEventSender | None = None
     system_status_reader: SystemStatusReader | None = None
@@ -116,6 +121,9 @@ class NativeVoiceCommandService:
             message = _native_validation_message(error)
             _try_speak_native_validation_message(message, self.speech_engine_factory)
             raise NativeVoiceCommandError(message) from error
+        except NoSpeechDetectedError as error:
+            _try_speak_native_validation_message(str(error), self.speech_engine_factory)
+            raise NativeVoiceCommandError(str(error)) from error
         except (
             MicrophoneError,
             EmptyAudioError,

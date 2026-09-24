@@ -1,3 +1,5 @@
+import io
+import wave
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -10,7 +12,16 @@ from deskpilot_backend.main import (
     get_speech_engine_factory,
     get_transcription_service,
 )
-from deskpilot_backend.microphone import MicrophoneError, encode_wav
+from deskpilot_backend.microphone import (
+    AdaptiveRecordingConfig,
+    MicrophoneError,
+    NoSpeechDetectedError,
+    SAMPLE_RATE,
+    capture_adaptive_speech_pcm,
+    capture_adaptive_speech_wav,
+    encode_wav,
+    frame_energy,
+)
 from deskpilot_backend.models import TranscriptionResponse
 
 
@@ -69,6 +80,17 @@ class FakeRecorder:
     def __call__(self, duration_seconds: int) -> bytes:
         self.durations.append(duration_seconds)
         return self.audio_bytes
+
+
+def pcm_frame(amplitude: int, samples: int = 1600) -> bytes:
+    return int(amplitude).to_bytes(2, "little", signed=True) * samples
+
+
+def frame_source(frames: list[bytes]):
+    def source(frame_samples: int, max_frames: int):
+        yield from frames[:max_frames]
+
+    return source
 
 
 @contextmanager
@@ -194,3 +216,141 @@ def test_microphone_failure_stops_before_transcription_action_and_speech() -> No
     assert response.status_code == 503
     assert response.json() == {"detail": "Local microphone recording is unavailable."}
     assert launcher.commands == []
+
+
+def test_adaptive_capture_detects_speech_onset_preroll_and_end_silence() -> None:
+    quiet = pcm_frame(0)
+    speech = pcm_frame(4000)
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=3,
+        frame_duration_ms=100,
+        energy_threshold=1000,
+        initial_speech_timeout_seconds=1,
+        end_silence_ms=200,
+        min_speech_ms=200,
+        pre_roll_ms=400,
+        speech_start_frames=2,
+    )
+    frames = [quiet, quiet, speech, speech, speech, quiet, quiet, quiet]
+
+    captured = capture_adaptive_speech_pcm(
+        config,
+        frame_source=frame_source(frames),
+    )
+
+    assert captured[0] == quiet
+    assert captured[1] == quiet
+    assert captured[2] == speech
+    assert captured[-2:] == [quiet, quiet]
+
+
+def test_adaptive_capture_times_out_without_speech() -> None:
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=3,
+        frame_duration_ms=100,
+        energy_threshold=1000,
+        initial_speech_timeout_seconds=0.3,
+    )
+
+    try:
+        capture_adaptive_speech_pcm(
+            config,
+            frame_source=frame_source([pcm_frame(999)] * 10),
+        )
+    except NoSpeechDetectedError as error:
+        assert str(error) == "I didn't hear a command."
+    else:
+        raise AssertionError("Expected NoSpeechDetectedError")
+
+
+def test_adaptive_capture_enforces_minimum_speech_duration() -> None:
+    quiet = pcm_frame(0)
+    speech = pcm_frame(4000)
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=3,
+        frame_duration_ms=100,
+        energy_threshold=1000,
+        initial_speech_timeout_seconds=1,
+        end_silence_ms=200,
+        min_speech_ms=500,
+        pre_roll_ms=100,
+        speech_start_frames=2,
+    )
+
+    try:
+        capture_adaptive_speech_pcm(
+            config,
+            frame_source=frame_source([speech, speech, quiet, quiet]),
+        )
+    except NoSpeechDetectedError:
+        return
+
+    raise AssertionError("Expected short speech to be rejected")
+
+
+def test_adaptive_capture_never_exceeds_hard_maximum_duration() -> None:
+    speech = pcm_frame(4000)
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=1,
+        frame_duration_ms=100,
+        energy_threshold=1000,
+        initial_speech_timeout_seconds=1,
+        min_speech_ms=200,
+        speech_start_frames=2,
+    )
+
+    captured = capture_adaptive_speech_pcm(
+        config,
+        frame_source=frame_source([speech] * 30),
+    )
+
+    assert len(captured) == config.max_frames
+
+
+def test_adaptive_capture_rejects_noisy_near_threshold_frames() -> None:
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=2,
+        frame_duration_ms=100,
+        energy_threshold=1000,
+        initial_speech_timeout_seconds=0.5,
+        speech_start_frames=2,
+    )
+
+    try:
+        capture_adaptive_speech_pcm(
+            config,
+            frame_source=frame_source([pcm_frame(999)] * 10),
+        )
+    except NoSpeechDetectedError:
+        return
+
+    raise AssertionError("Expected near-threshold frames to be ignored")
+
+
+def test_adaptive_capture_returns_wav_for_final_segment_only() -> None:
+    speech = pcm_frame(4000)
+    quiet = pcm_frame(0)
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=2,
+        frame_duration_ms=100,
+        energy_threshold=1000,
+        initial_speech_timeout_seconds=1,
+        end_silence_ms=200,
+        min_speech_ms=200,
+        speech_start_frames=2,
+    )
+
+    wav_audio = capture_adaptive_speech_wav(
+        config,
+        frame_source=frame_source([quiet, speech, speech, quiet, quiet]),
+    )
+
+    with wave.open(io.BytesIO(wav_audio), "rb") as wav_file:
+        assert wav_file.getframerate() == SAMPLE_RATE
+        assert wav_file.getnchannels() == 1
+        assert wav_file.getnframes() > 0
+
+
+def test_frame_energy_is_deterministic_for_pcm_frames() -> None:
+    assert frame_energy(pcm_frame(0)) == 0
+    assert frame_energy(pcm_frame(2000)) == 2000

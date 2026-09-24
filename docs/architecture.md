@@ -4,20 +4,25 @@ DeskPilot is a local-first Windows assistant built around deterministic routing 
 
 ```mermaid
 flowchart LR
-    A[Local wake word\nHey Jarvis] --> B[Microphone capture\nshort WAV clip]
-    B --> C[Transcription\nlocal faster-whisper or optional OpenAI gpt-transcribe]
-    C --> D[Deterministic router\ncommands.py]
-    D -->|recognized| F[Allowlisted executor\nactions.py]
-    D -->|unknown only| E[Optional OpenAI interpreter\nResponses function calling store=false]
-    E -->|validated local command| D
-    E -->|clarify or unknown| H[Local response]
-    F --> I[Local TTS\npyttsx3 / SAPI]
-    F --> J[Tray notification\nPySide6]
+    A[Local wake word\nHey Jarvis] --> B[Adaptive endpointing\nlocal PCM energy]
+    B --> C[Final bounded WAV segment]
+    C --> D[Transcription\nlocal faster-whisper or optional OpenAI gpt-transcribe]
+    D --> E[Deterministic router\ncommands.py]
+    E -->|recognized| G[Allowlisted executor\nactions.py]
+    E -->|unknown only| F[Optional OpenAI interpreter\nResponses function calling store=false]
+    F -->|validated local command| E
+    F -->|clarify or unknown| H[Local response]
+    G --> I[Local TTS\npyttsx3 / SAPI]
+    G --> J[Tray notification\nPySide6]
 ```
 
 ## Native Flow
 
-The native shell runs with `python -m deskpilot_backend.desktop`. Wake-word listening is off by default unless local settings enable it. When enabled, openWakeWord listens locally for "Hey Jarvis". On detection, DeskPilot stops the wake-word microphone stream, records one command clip, transcribes it, routes it through the deterministic command router, and executes only allowlisted actions.
+The native shell runs with `python -m deskpilot_backend.desktop`. Wake-word listening is off by default unless local settings enable it. When enabled, openWakeWord listens locally for "Hey Jarvis". On detection, DeskPilot stops the wake-word microphone stream and starts local adaptive command endpointing.
+
+Endpointing is deterministic and local. DeskPilot reads short 16 kHz mono PCM frames, waits for consecutive frames above an energy threshold, keeps a small pre-roll so command starts are not clipped, and ends capture after sustained trailing silence. The existing command capture duration setting remains the hard maximum, so noisy environments cannot keep the microphone open beyond the validated local limit. If no speech is detected, no audio is sent to transcription and DeskPilot reports that it did not hear a command.
+
+Only the final bounded command WAV segment is sent to the selected transcription provider. The rest of the flow routes the resulting text through the deterministic command router and executes only allowlisted actions.
 
 The overlay is visual feedback only:
 
