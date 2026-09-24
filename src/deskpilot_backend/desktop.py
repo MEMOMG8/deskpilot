@@ -136,6 +136,7 @@ def main() -> int:
         native_command_processing = Signal()
         native_command_completed = Signal(object)
         native_command_failed = Signal(str)
+        native_recoverable_error = Signal(str)
         reminder_due = Signal(str)
 
     app = QApplication(sys.argv)
@@ -291,6 +292,9 @@ def main() -> int:
         visual_controller.show_error(after_hide=finish_native_command)
         tray.showMessage("DeskPilot", message)
 
+    def on_native_recoverable_error(message: str) -> None:
+        tray.showMessage("DeskPilot", message)
+
     def on_reminder_due(message: str) -> None:
         tray.showMessage("DeskPilot", message)
 
@@ -308,6 +312,7 @@ def main() -> int:
         reminder_service=reminder_service,
         settings_store=settings_store,
         on_processing_started=signals.native_command_processing.emit,
+        on_recoverable_error=signals.native_recoverable_error.emit,
     )
     start_wake_on_startup = apply_native_voice_preferences(
         native_voice_service,
@@ -324,6 +329,7 @@ def main() -> int:
     signals.native_command_processing.connect(on_native_command_processing)
     signals.native_command_completed.connect(on_native_command_completed)
     signals.native_command_failed.connect(on_native_command_failed)
+    signals.native_recoverable_error.connect(on_native_recoverable_error)
 
     menu.addAction(show_action)
     menu.addAction(hide_action)

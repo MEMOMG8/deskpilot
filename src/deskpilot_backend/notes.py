@@ -58,7 +58,7 @@ class NoteStore:
         if not note_paths:
             return None
 
-        return max(note_paths, key=lambda path: (path.stat().st_mtime_ns, path.name))
+        return max(note_paths, key=lambda path: path.name)
 
     @staticmethod
     def _generate_filename() -> str:

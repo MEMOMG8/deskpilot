@@ -300,3 +300,60 @@ def test_native_voice_handoff_stops_wake_word_before_recording() -> None:
 
     assert response.assistant.intent == "help"
     assert events == ["wake_stopped", "command_recorded"]
+
+
+def test_native_voice_cloud_transcription_fallback_recovers_and_notifies() -> None:
+    wav_audio = encode_wav(b"\x00\x00" * 16000)
+    recorder = FakeRecorder(wav_audio)
+    launcher = RecordingLauncher()
+    engine = FakeSpeechEngine()
+    recoverable_errors: list[str] = []
+    provider_requests: list[str] = []
+
+    class FallbackProvider:
+        def __init__(self, on_fallback) -> None:
+            self.on_fallback = on_fallback
+
+        def transcribe(
+            self,
+            audio_bytes: bytes,
+            *,
+            content_type: str | None,
+            filename: str | None = None,
+        ) -> TranscriptionResponse:
+            assert audio_bytes == wav_audio
+            if self.on_fallback is not None:
+                self.on_fallback(
+                    "OpenAI transcription is unavailable; using local transcription."
+                )
+            return TranscriptionResponse(
+                status="completed",
+                message="Transcription completed.",
+                text="open calculator",
+                language="en",
+            )
+
+    service = NativeVoiceCommandService(
+        recorder=recorder,
+        launcher=launcher,
+        speech_engine_factory=lambda: engine,
+        cue_player=no_op_cue,
+        on_recoverable_error=recoverable_errors.append,
+        voice_transcription_provider="openai",
+        transcription_provider_factory=lambda provider, on_fallback: (
+            provider_requests.append(provider) or FallbackProvider(on_fallback)
+        ),
+    )
+
+    response = service.run()
+
+    assert response.assistant.status == "executed"
+    assert launcher.commands == [["calc.exe"]]
+    assert provider_requests == ["openai"]
+    assert recoverable_errors == [
+        "OpenAI transcription is unavailable; using local transcription."
+    ]
+    assert engine.spoken_text == [
+        "OpenAI transcription is unavailable; using local transcription.",
+        "Opening Calculator.",
+    ]

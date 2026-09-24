@@ -7,6 +7,7 @@ from deskpilot_backend.desktop_voice import (
 )
 from deskpilot_backend.settings import (
     DEFAULT_COMMAND_CAPTURE_DURATION_SECONDS,
+    DEFAULT_TRANSCRIPTION_PROVIDER,
     DeskPilotSettings,
     SettingsStore,
     default_settings_data,
@@ -41,6 +42,22 @@ def test_invalid_capture_duration_falls_back_to_safe_default() -> None:
         DEFAULT_COMMAND_CAPTURE_DURATION_SECONDS
     )
     assert settings.warnings
+
+
+def test_invalid_voice_transcription_provider_falls_back_to_auto() -> None:
+    settings = parse_settings(
+        {
+            "version": 1,
+            "command_capture_duration_seconds": 4,
+            "recording_start_cue_enabled": True,
+            "wake_listening_on_startup": False,
+            "voice_transcription_provider": "cloudy",
+            "custom_aliases": {},
+        }
+    )
+
+    assert settings.voice_transcription_provider == DEFAULT_TRANSCRIPTION_PROVIDER
+    assert settings.warnings == ("Invalid voice transcription provider; using auto.",)
 
 
 def test_malformed_existing_settings_uses_defaults_without_rewriting(tmp_path) -> None:
@@ -144,6 +161,7 @@ def test_native_startup_preferences_configure_voice_service() -> None:
         command_capture_duration_seconds=6,
         recording_start_cue_enabled=False,
         wake_listening_on_startup=True,
+        voice_transcription_provider="openai",
         custom_aliases={"open my projects": "open github"},
     )
 
@@ -156,6 +174,7 @@ def test_native_startup_preferences_configure_voice_service() -> None:
 
     assert should_start_wake is True
     assert service.capture_duration_seconds == 6
+    assert service.voice_transcription_provider == "openai"
     assert service.custom_aliases == {"open my projects": "open github"}
 
     service.cue_player()

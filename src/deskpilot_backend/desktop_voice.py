@@ -1,5 +1,5 @@
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from deskpilot_backend.actions import (
     KeyEventSender,
@@ -16,9 +16,11 @@ from deskpilot_backend.settings import DeskPilotSettings, SettingsStore
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
 from deskpilot_backend.transcription import (
     EmptyAudioError,
+    ProviderTranscriptionService,
+    TranscriptionProvider,
+    TranscriptionService,
     TranscriptionServiceError,
     UnsupportedAudioError,
-    WhisperTranscriptionService,
 )
 from deskpilot_backend.voice import handle_voice_command
 
@@ -30,6 +32,11 @@ NATIVE_UNKNOWN_COMMAND_MESSAGE = "I didn't catch that. Say help for available co
 
 CuePlayer = Callable[[], None]
 ProgressCallback = Callable[[], None]
+RecoverableErrorCallback = Callable[[str], None]
+TranscriptionProviderFactory = Callable[
+    [TranscriptionProvider, RecoverableErrorCallback | None],
+    TranscriptionService,
+]
 
 
 class NativeVoiceCommandError(RuntimeError):
@@ -48,9 +55,7 @@ def skip_recording_start_cue() -> None:
 
 @dataclass
 class NativeVoiceCommandService:
-    transcription_service: WhisperTranscriptionService = field(
-        default_factory=WhisperTranscriptionService
-    )
+    transcription_service: TranscriptionService | None = None
     recorder: AudioRecorder = record_microphone_wav
     launcher: ProcessLauncher | None = None
     key_event_sender: KeyEventSender | None = None
@@ -61,7 +66,10 @@ class NativeVoiceCommandService:
     speech_engine_factory: SpeechEngineFactory | None = None
     cue_player: CuePlayer = play_recording_start_cue
     on_processing_started: ProgressCallback | None = None
+    on_recoverable_error: RecoverableErrorCallback | None = None
     capture_duration_seconds: int = NATIVE_COMMAND_DURATION_SECONDS
+    voice_transcription_provider: TranscriptionProvider = "auto"
+    transcription_provider_factory: TranscriptionProviderFactory | None = None
     custom_aliases: Mapping[str, str] | None = None
 
     def run(self) -> VoiceCommandResponse:
@@ -80,7 +88,7 @@ class NativeVoiceCommandService:
                 content_type=NATIVE_COMMAND_CONTENT_TYPE,
                 filename=NATIVE_COMMAND_FILENAME,
                 speak=False,
-                transcription_service=self.transcription_service,
+                transcription_service=self._get_transcription_service(),
                 launcher=self.launcher,
                 key_event_sender=self.key_event_sender,
                 system_status_reader=self.system_status_reader,
@@ -104,6 +112,25 @@ class NativeVoiceCommandService:
         ) as error:
             raise NativeVoiceCommandError(str(error)) from error
 
+    def _get_transcription_service(self) -> TranscriptionService:
+        if self.transcription_service is not None:
+            return self.transcription_service
+
+        provider_factory = (
+            self.transcription_provider_factory
+            or _build_provider_transcription_service
+        )
+        return provider_factory(
+            self.voice_transcription_provider,
+            self._handle_transcription_fallback,
+        )
+
+    def _handle_transcription_fallback(self, message: str) -> None:
+        if self.on_recoverable_error is not None:
+            self.on_recoverable_error(message)
+
+        _speak_recoverable_native_error(message, self.speech_engine_factory)
+
 
 def apply_native_voice_preferences(
     service: NativeVoiceCommandService,
@@ -119,7 +146,25 @@ def apply_native_voice_preferences(
         else disabled_cue_player
     )
     service.custom_aliases = settings.custom_aliases
+    service.voice_transcription_provider = settings.voice_transcription_provider
     return settings.wake_listening_on_startup
+
+
+def _build_provider_transcription_service(
+    provider: TranscriptionProvider,
+    on_fallback: RecoverableErrorCallback | None,
+) -> ProviderTranscriptionService:
+    return ProviderTranscriptionService(provider=provider, on_fallback=on_fallback)
+
+
+def _speak_recoverable_native_error(
+    message: str,
+    speech_engine_factory: SpeechEngineFactory | None,
+) -> None:
+    try:
+        speak_text(message, engine_factory=speech_engine_factory)
+    except SpeechEngineError:
+        return
 
 
 def _narrate_native_response(

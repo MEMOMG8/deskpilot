@@ -12,7 +12,7 @@ from deskpilot_backend.notes import NoteStore
 from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.settings import SettingsStore
 from deskpilot_backend.speech import SpeechEngineFactory
-from deskpilot_backend.transcription import WhisperTranscriptionService
+from deskpilot_backend.transcription import TranscriptionService
 
 
 def handle_voice_command(
@@ -21,7 +21,7 @@ def handle_voice_command(
     content_type: str | None,
     filename: str | None,
     speak: bool,
-    transcription_service: WhisperTranscriptionService,
+    transcription_service: TranscriptionService,
     launcher: ProcessLauncher | None = None,
     key_event_sender: KeyEventSender | None = None,
     system_status_reader: SystemStatusReader | None = None,

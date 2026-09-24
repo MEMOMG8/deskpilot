@@ -1,12 +1,13 @@
 # DeskPilot
 
-DeskPilot is a local-first Windows voice assistant that demonstrates safe native automation with offline speech, deterministic command routing, and explicit allowlisted actions.
+DeskPilot is a local-first Windows voice assistant that demonstrates safe native automation with deterministic command routing and explicit allowlisted actions.
 
 ## Features
 
 - Native Windows tray shell with local wake-word activation: "Hey Jarvis"
 - Push-to-talk browser demo and API endpoints for typed, uploaded-audio, and microphone commands
-- Offline transcription with `faster-whisper` and local Windows SAPI text-to-speech through `pyttsx3`
+- Configurable command transcription: automatic OpenAI `gpt-transcribe` when `OPENAI_API_KEY` is set, or local `faster-whisper` fallback
+- Local Windows SAPI text-to-speech through `pyttsx3`
 - Deterministic English command router with no fuzzy matching, LLM, or cloud API
 - Strict allowlisted execution for apps, fixed websites, bounded search, media keys, workspace shortcuts, notes, reminders, and settings
 - Local notes, reminders, and settings stored under `~/Documents/DeskPilot`
@@ -14,7 +15,9 @@ DeskPilot is a local-first Windows voice assistant that demonstrates safe native
 
 ## Privacy And Safety
 
-DeskPilot is designed to keep user data and voice processing local. Audio is captured only after an explicit button press or enabled local wake-word detection, then processed locally. Notes, reminders, and settings are plain local files under `~/Documents/DeskPilot`.
+DeskPilot is designed to keep actions, storage, wake-word detection, text-to-speech, notes, reminders, and settings local. Audio is captured only after an explicit button press or enabled local wake-word detection.
+
+Native wake-word commands can optionally use OpenAI `gpt-transcribe` for the already-recorded short command WAV. DeskPilot never streams continuous microphone audio, does not send notes/reminders/settings as transcription context, and does not write or retain command recordings. If OpenAI transcription is unavailable, DeskPilot falls back to local `faster-whisper` when possible.
 
 Safety is enforced with deterministic parsing and explicit allowlists. DeskPilot does not execute arbitrary text, shell commands, paths, URLs, or user-provided executables. Search queries are URL-encoded into trusted search endpoints, and custom aliases may only point to already-supported fixed commands.
 
@@ -61,6 +64,15 @@ Native voice states:
 
 The first wake-word start may download/cache openWakeWord's local `hey_jarvis` model. openWakeWord code is Apache-2.0 licensed, while its included pre-trained models are licensed CC BY-NC-SA 4.0.
 
+For stronger native command transcription, set `OPENAI_API_KEY` before starting the tray app:
+
+```powershell
+$env:OPENAI_API_KEY = "your_api_key_here"
+python -m deskpilot_backend.desktop
+```
+
+Do not commit API keys. With the default `auto` transcription provider, DeskPilot uses OpenAI only when this environment variable exists; otherwise it uses local transcription.
+
 ## Tests
 
 ```powershell
@@ -85,11 +97,20 @@ DeskPilot stores local preferences in `~/Documents/DeskPilot/settings.json`. The
   "command_capture_duration_seconds": 4,
   "recording_start_cue_enabled": true,
   "wake_listening_on_startup": false,
+  "voice_transcription_provider": "auto",
   "custom_aliases": {}
 }
 ```
 
 `command_capture_duration_seconds` is allowed from `2` through `8`; invalid values fall back to `4`. `recording_start_cue_enabled` controls the local Windows cue before native command recording. `wake_listening_on_startup` starts wake-word listening when the tray shell opens.
+
+`voice_transcription_provider` controls only native wake-word command transcription:
+
+- `auto`: use OpenAI `gpt-transcribe` when `OPENAI_API_KEY` exists, otherwise use local `faster-whisper`
+- `local`: always use local `faster-whisper`
+- `openai`: prefer OpenAI and fall back locally if cloud transcription is unavailable
+
+Invalid provider values use `auto`.
 
 Custom aliases map one fixed phrase to an existing fixed command ID:
 
