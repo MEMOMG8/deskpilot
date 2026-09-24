@@ -16,6 +16,10 @@ from deskpilot_backend.commands import (
     WORKSPACE_COMMANDS,
     normalize_command_text,
 )
+from deskpilot_backend.command_interpreter import (
+    DEFAULT_COMMAND_INTERPRETER_PROVIDER,
+    InterpreterProvider,
+)
 from deskpilot_backend.transcription import (
     DEFAULT_TRANSCRIPTION_PROVIDER,
     TranscriptionProvider,
@@ -28,6 +32,7 @@ MIN_COMMAND_CAPTURE_DURATION_SECONDS = 2
 MAX_COMMAND_CAPTURE_DURATION_SECONDS = 8
 MAX_ALIAS_LENGTH = 80
 ALLOWED_TRANSCRIPTION_PROVIDERS = {"auto", "local", "openai"}
+ALLOWED_COMMAND_INTERPRETER_PROVIDERS = {"auto", "local", "openai"}
 
 
 class SettingsStoreError(RuntimeError):
@@ -44,6 +49,9 @@ class DeskPilotSettings:
     wake_listening_on_startup: bool = False
     voice_transcription_provider: TranscriptionProvider = (
         DEFAULT_TRANSCRIPTION_PROVIDER
+    )
+    voice_command_interpreter_provider: InterpreterProvider = (
+        DEFAULT_COMMAND_INTERPRETER_PROVIDER
     )
     custom_aliases: dict[str, str] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
@@ -93,6 +101,7 @@ def default_settings_data() -> dict[str, Any]:
         "recording_start_cue_enabled": True,
         "wake_listening_on_startup": False,
         "voice_transcription_provider": DEFAULT_TRANSCRIPTION_PROVIDER,
+        "voice_command_interpreter_provider": DEFAULT_COMMAND_INTERPRETER_PROVIDER,
         "custom_aliases": {},
     }
 
@@ -169,6 +178,13 @@ def parse_settings(raw_settings: object) -> DeskPilotSettings:
         ),
         warnings,
     )
+    voice_command_interpreter_provider = _parse_command_interpreter_provider(
+        raw_settings.get(
+            "voice_command_interpreter_provider",
+            DEFAULT_COMMAND_INTERPRETER_PROVIDER,
+        ),
+        warnings,
+    )
     custom_aliases = parse_custom_aliases(
         raw_settings.get("custom_aliases"),
         warnings=warnings,
@@ -179,6 +195,7 @@ def parse_settings(raw_settings: object) -> DeskPilotSettings:
         recording_start_cue_enabled=recording_start_cue_enabled,
         wake_listening_on_startup=wake_listening_on_startup,
         voice_transcription_provider=voice_transcription_provider,
+        voice_command_interpreter_provider=voice_command_interpreter_provider,
         custom_aliases=custom_aliases,
         warnings=tuple(warnings),
     )
@@ -277,6 +294,17 @@ def _parse_transcription_provider(
 
     warnings.append("Invalid voice transcription provider; using auto.")
     return DEFAULT_TRANSCRIPTION_PROVIDER
+
+
+def _parse_command_interpreter_provider(
+    raw_value: object,
+    warnings: list[str],
+) -> InterpreterProvider:
+    if isinstance(raw_value, str) and raw_value in ALLOWED_COMMAND_INTERPRETER_PROVIDERS:
+        return raw_value
+
+    warnings.append("Invalid voice command interpreter provider; using auto.")
+    return DEFAULT_COMMAND_INTERPRETER_PROVIDER
 
 
 def _is_valid_alias_phrase(alias: str, normalized_alias: str) -> bool:

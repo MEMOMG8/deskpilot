@@ -1,6 +1,7 @@
 import pytest
 
 from deskpilot_backend.actions import KEYEVENTF_KEYUP, VK_MEDIA_PLAY_PAUSE
+from deskpilot_backend.command_interpreter import CommandInterpreterError
 from deskpilot_backend.desktop_state import NativeWakeWordCommandController
 from deskpilot_backend.desktop_voice import (
     NATIVE_COMMAND_DURATION_SECONDS,
@@ -69,6 +70,15 @@ class FakeSpeechEngine:
 
     def runAndWait(self) -> None:
         self.completed = True
+
+
+class FailingCommandInterpreter:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def interpret(self, transcript: str):
+        self.calls.append(transcript)
+        raise CommandInterpreterError("Cloud interpreter failed.")
 
 
 class FakeRecorder:
@@ -357,3 +367,36 @@ def test_native_voice_cloud_transcription_fallback_recovers_and_notifies() -> No
         "OpenAI transcription is unavailable; using local transcription.",
         "Opening Calculator.",
     ]
+
+
+def test_native_voice_cloud_interpreter_failure_recovers_without_action(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    wav_audio = encode_wav(b"\x00\x00" * 16000)
+    launcher = RecordingLauncher()
+    engine = FakeSpeechEngine()
+    interpreter = FailingCommandInterpreter()
+    recoverable_errors: list[str] = []
+    service = NativeVoiceCommandService(
+        transcription_service=FakeTranscriptionService("Please open paint"),
+        command_interpreter=interpreter,
+        recorder=FakeRecorder(wav_audio),
+        launcher=launcher,
+        speech_engine_factory=lambda: engine,
+        cue_player=no_op_cue,
+        on_recoverable_error=recoverable_errors.append,
+        voice_command_interpreter_provider="openai",
+    )
+
+    response = service.run()
+
+    assert response.assistant.intent == "unknown"
+    assert response.assistant.status == "not_supported"
+    assert response.assistant.message == NATIVE_UNKNOWN_COMMAND_MESSAGE
+    assert launcher.commands == []
+    assert interpreter.calls == ["Please open paint"]
+    assert recoverable_errors == [
+        "Natural-language command understanding is unavailable."
+    ]
+    assert engine.spoken_text == [NATIVE_UNKNOWN_COMMAND_MESSAGE]

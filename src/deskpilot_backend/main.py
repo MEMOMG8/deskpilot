@@ -13,6 +13,11 @@ from deskpilot_backend.actions import (
     execute_action,
 )
 from deskpilot_backend.assistant import handle_assistant_command
+from deskpilot_backend.command_interpreter import (
+    ClarificationStore,
+    CommandInterpreter,
+    OpenAICommandInterpreter,
+)
 from deskpilot_backend.commands import CommandValidationError, route_command
 from deskpilot_backend.models import (
     ActionExecutionRequest,
@@ -46,6 +51,8 @@ from deskpilot_backend.voice import handle_voice_command
 
 app = FastAPI(title="DeskPilot")
 transcription_service = WhisperTranscriptionService()
+command_interpreter = OpenAICommandInterpreter()
+clarification_store = ClarificationStore()
 reminder_service = ReminderService()
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -82,6 +89,14 @@ def get_speech_engine_factory() -> SpeechEngineFactory | None:
 
 def get_transcription_service() -> WhisperTranscriptionService:
     return transcription_service
+
+
+def get_command_interpreter() -> CommandInterpreter:
+    return command_interpreter
+
+
+def get_clarification_store() -> ClarificationStore:
+    return clarification_store
 
 
 def get_audio_recorder() -> AudioRecorder:
@@ -147,6 +162,8 @@ def create_assistant_command(
     note_store: NoteStore | None = Depends(get_note_store),
     reminders: ReminderService = Depends(get_reminder_service),
     settings_store: SettingsStore = Depends(get_settings_store),
+    interpreter: CommandInterpreter = Depends(get_command_interpreter),
+    clarifications: ClarificationStore = Depends(get_clarification_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -161,6 +178,8 @@ def create_assistant_command(
             reminder_service=reminders,
             settings_store=settings_store,
             speech_engine_factory=speech_engine_factory,
+            command_interpreter=interpreter,
+            clarification_store=clarifications,
         )
     except CommandValidationError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -215,6 +234,8 @@ async def create_voice_command(
     note_store: NoteStore | None = Depends(get_note_store),
     reminders: ReminderService = Depends(get_reminder_service),
     settings_store: SettingsStore = Depends(get_settings_store),
+    interpreter: CommandInterpreter = Depends(get_command_interpreter),
+    clarifications: ClarificationStore = Depends(get_clarification_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -235,6 +256,8 @@ async def create_voice_command(
             reminder_service=reminders,
             settings_store=settings_store,
             speech_engine_factory=speech_engine_factory,
+            command_interpreter=interpreter,
+            clarification_store=clarifications,
         )
     except EmptyAudioError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -263,6 +286,8 @@ def create_microphone_command(
     note_store: NoteStore | None = Depends(get_note_store),
     reminders: ReminderService = Depends(get_reminder_service),
     settings_store: SettingsStore = Depends(get_settings_store),
+    interpreter: CommandInterpreter = Depends(get_command_interpreter),
+    clarifications: ClarificationStore = Depends(get_clarification_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
         get_speech_engine_factory
     ),
@@ -282,6 +307,8 @@ def create_microphone_command(
             reminder_service=reminders,
             settings_store=settings_store,
             speech_engine_factory=speech_engine_factory,
+            command_interpreter=interpreter,
+            clarification_store=clarifications,
         )
     except MicrophoneError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error

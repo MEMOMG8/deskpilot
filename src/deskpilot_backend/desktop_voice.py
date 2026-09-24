@@ -7,6 +7,12 @@ from deskpilot_backend.actions import (
     SystemStatusReader,
     UnsupportedActionError,
 )
+from deskpilot_backend.command_interpreter import (
+    ClarificationStore,
+    CommandInterpreter,
+    InterpreterProvider,
+    OpenAICommandInterpreter,
+)
 from deskpilot_backend.commands import CommandValidationError
 from deskpilot_backend.microphone import AudioRecorder, MicrophoneError, record_microphone_wav
 from deskpilot_backend.models import VoiceCommandResponse
@@ -56,6 +62,8 @@ def skip_recording_start_cue() -> None:
 @dataclass
 class NativeVoiceCommandService:
     transcription_service: TranscriptionService | None = None
+    command_interpreter: CommandInterpreter | None = None
+    clarification_store: ClarificationStore | None = None
     recorder: AudioRecorder = record_microphone_wav
     launcher: ProcessLauncher | None = None
     key_event_sender: KeyEventSender | None = None
@@ -69,6 +77,7 @@ class NativeVoiceCommandService:
     on_recoverable_error: RecoverableErrorCallback | None = None
     capture_duration_seconds: int = NATIVE_COMMAND_DURATION_SECONDS
     voice_transcription_provider: TranscriptionProvider = "auto"
+    voice_command_interpreter_provider: InterpreterProvider = "auto"
     transcription_provider_factory: TranscriptionProviderFactory | None = None
     custom_aliases: Mapping[str, str] | None = None
 
@@ -96,6 +105,10 @@ class NativeVoiceCommandService:
                 reminder_service=self.reminder_service,
                 settings_store=self.settings_store,
                 custom_aliases=self.custom_aliases,
+                command_interpreter=self._get_command_interpreter(),
+                command_interpreter_provider=self.voice_command_interpreter_provider,
+                clarification_store=self._get_clarification_store(),
+                on_recoverable_error=self._handle_interpreter_recoverable_error,
             )
             _narrate_native_response(response, self.speech_engine_factory)
             return response
@@ -131,6 +144,22 @@ class NativeVoiceCommandService:
 
         _speak_recoverable_native_error(message, self.speech_engine_factory)
 
+    def _get_command_interpreter(self) -> CommandInterpreter:
+        if self.command_interpreter is None:
+            self.command_interpreter = OpenAICommandInterpreter()
+
+        return self.command_interpreter
+
+    def _get_clarification_store(self) -> ClarificationStore:
+        if self.clarification_store is None:
+            self.clarification_store = ClarificationStore()
+
+        return self.clarification_store
+
+    def _handle_interpreter_recoverable_error(self, message: str) -> None:
+        if self.on_recoverable_error is not None:
+            self.on_recoverable_error(message)
+
 
 def apply_native_voice_preferences(
     service: NativeVoiceCommandService,
@@ -147,6 +176,9 @@ def apply_native_voice_preferences(
     )
     service.custom_aliases = settings.custom_aliases
     service.voice_transcription_provider = settings.voice_transcription_provider
+    service.voice_command_interpreter_provider = (
+        settings.voice_command_interpreter_provider
+    )
     return settings.wake_listening_on_startup
 
 
@@ -171,7 +203,10 @@ def _narrate_native_response(
     response: VoiceCommandResponse,
     speech_engine_factory: SpeechEngineFactory | None,
 ) -> None:
-    if response.assistant.status == "not_supported":
+    if (
+        response.assistant.status == "not_supported"
+        and not response.assistant.requires_confirmation
+    ):
         response.assistant.message = NATIVE_UNKNOWN_COMMAND_MESSAGE
 
     try:

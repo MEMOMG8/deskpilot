@@ -7,8 +7,9 @@ DeskPilot is a local-first Windows voice assistant that demonstrates safe native
 - Native Windows tray shell with local wake-word activation: "Hey Jarvis"
 - Push-to-talk browser demo and API endpoints for typed, uploaded-audio, and microphone commands
 - Configurable command transcription: automatic OpenAI `gpt-transcribe` when `OPENAI_API_KEY` is set, or local `faster-whisper` fallback
+- Optional OpenAI natural-language command understanding for unsupported phrasing, with strict function schemas and local allowlist validation
 - Local Windows SAPI text-to-speech through `pyttsx3`
-- Deterministic English command router with no fuzzy matching, LLM, or cloud API
+- Deterministic English command router remains the first path for every command
 - Strict allowlisted execution for apps, fixed websites, bounded search, media keys, workspace shortcuts, notes, reminders, and settings
 - Local notes, reminders, and settings stored under `~/Documents/DeskPilot`
 - Unit-tested services with mocked microphone, speech, wake word, process launching, and timers
@@ -17,7 +18,9 @@ DeskPilot is a local-first Windows voice assistant that demonstrates safe native
 
 DeskPilot is designed to keep actions, storage, wake-word detection, text-to-speech, notes, reminders, and settings local. Audio is captured only after an explicit button press or enabled local wake-word detection.
 
-Native wake-word commands can optionally use OpenAI `gpt-transcribe` for the already-recorded short command WAV. DeskPilot never streams continuous microphone audio, does not send notes/reminders/settings as transcription context, and does not write or retain command recordings. If OpenAI transcription is unavailable, DeskPilot falls back to local `faster-whisper` when possible.
+Native wake-word commands can optionally use OpenAI `gpt-transcribe` for the already-recorded short command WAV. DeskPilot can also optionally use OpenAI Responses function calling to interpret natural English phrasing only after the deterministic router does not recognize a command. DeskPilot never streams continuous microphone audio, does not send notes/reminders/settings/history/file contents as context, and does not write or retain command recordings or cloud requests.
+
+Cloud interpretation never executes actions. It may only propose a strict typed outcome, and local DeskPilot code validates that outcome through the existing command router and allowlisted executor. If OpenAI transcription or interpretation is unavailable, DeskPilot falls back to local behavior when possible.
 
 Safety is enforced with deterministic parsing and explicit allowlists. DeskPilot does not execute arbitrary text, shell commands, paths, URLs, or user-provided executables. Search queries are URL-encoded into trusted search endpoints, and custom aliases may only point to already-supported fixed commands.
 
@@ -71,7 +74,7 @@ $env:OPENAI_API_KEY = "your_api_key_here"
 python -m deskpilot_backend.desktop
 ```
 
-Do not commit API keys. With the default `auto` transcription provider, DeskPilot uses OpenAI only when this environment variable exists; otherwise it uses local transcription.
+Do not commit API keys. With the default `auto` providers, DeskPilot uses OpenAI only when this environment variable exists; otherwise it preserves local transcription and deterministic command routing. OpenAI usage may incur API cost.
 
 ## Tests
 
@@ -98,6 +101,7 @@ DeskPilot stores local preferences in `~/Documents/DeskPilot/settings.json`. The
   "recording_start_cue_enabled": true,
   "wake_listening_on_startup": false,
   "voice_transcription_provider": "auto",
+  "voice_command_interpreter_provider": "auto",
   "custom_aliases": {}
 }
 ```
@@ -111,6 +115,14 @@ DeskPilot stores local preferences in `~/Documents/DeskPilot/settings.json`. The
 - `openai`: prefer OpenAI and fall back locally if cloud transcription is unavailable
 
 Invalid provider values use `auto`.
+
+`voice_command_interpreter_provider` controls natural-language command understanding after deterministic routing fails:
+
+- `auto`: use OpenAI Responses function calling when `OPENAI_API_KEY` exists, otherwise deterministic-only behavior
+- `local`: deterministic-only behavior
+- `openai`: prefer OpenAI interpretation and show a recoverable message if no key is configured
+
+The interpreter uses `store=false`, strict function schemas, no OpenAI built-in tools, and one tool call. Returned tool arguments are validated locally before any action can run.
 
 Custom aliases map one fixed phrase to an existing fixed command ID:
 

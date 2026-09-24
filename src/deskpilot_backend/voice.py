@@ -2,6 +2,11 @@ from collections.abc import Mapping
 
 from deskpilot_backend.actions import KeyEventSender, ProcessLauncher, SystemStatusReader
 from deskpilot_backend.assistant import handle_assistant_command
+from deskpilot_backend.command_interpreter import (
+    ClarificationStore,
+    CommandInterpreter,
+    InterpreterProvider,
+)
 from deskpilot_backend.models import (
     AssistantCommandRequest,
     AssistantCommandResponse,
@@ -30,6 +35,10 @@ def handle_voice_command(
     settings_store: SettingsStore | None = None,
     speech_engine_factory: SpeechEngineFactory | None = None,
     custom_aliases: Mapping[str, str] | None = None,
+    command_interpreter: CommandInterpreter | None = None,
+    command_interpreter_provider: InterpreterProvider | None = None,
+    clarification_store: ClarificationStore | None = None,
+    on_recoverable_error: object | None = None,
 ) -> VoiceCommandResponse:
     transcription = transcription_service.transcribe(
         audio_bytes,
@@ -58,6 +67,10 @@ def handle_voice_command(
         settings_store=settings_store,
         speech_engine_factory=speech_engine_factory,
         custom_aliases=custom_aliases,
+        command_interpreter=command_interpreter,
+        command_interpreter_provider=command_interpreter_provider,
+        clarification_store=clarification_store,
+        on_recoverable_error=on_recoverable_error,
     )
 
     return VoiceCommandResponse(

@@ -5,7 +5,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from deskpilot_backend.actions import KEYEVENTF_KEYUP, VK_MEDIA_PLAY_PAUSE, VK_VOLUME_UP
+from deskpilot_backend.assistant import handle_assistant_command
+from deskpilot_backend.command_interpreter import (
+    ClarificationStore,
+    CommandInterpretation,
+    CommandInterpreterError,
+)
 from deskpilot_backend.commands import HELP_MESSAGE
+from deskpilot_backend.models import AssistantCommandRequest
 from deskpilot_backend.main import (
     app,
     get_key_event_sender,
@@ -78,6 +85,22 @@ class FakeSpeechEngine:
 
     def runAndWait(self) -> None:
         self.completed = True
+
+
+class FakeCommandInterpreter:
+    def __init__(self, interpretation: CommandInterpretation | None = None) -> None:
+        self.interpretation = interpretation or CommandInterpretation(unknown=True)
+        self.calls: list[str] = []
+
+    def interpret(self, transcript: str) -> CommandInterpretation:
+        self.calls.append(transcript)
+        return self.interpretation
+
+
+class FailingCommandInterpreter(FakeCommandInterpreter):
+    def interpret(self, transcript: str) -> CommandInterpretation:
+        self.calls.append(transcript)
+        raise CommandInterpreterError("Natural-language command understanding failed.")
 
 
 @contextmanager
@@ -839,3 +862,203 @@ def test_assistant_speech_failure_does_not_change_command_result() -> None:
         "action": {"type": "open_app", "target": "calculator"},
     }
     assert launcher.commands == [["calc.exe"]]
+
+
+def test_exact_command_bypasses_cloud_interpreter(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    launcher = RecordingLauncher()
+    interpreter = FakeCommandInterpreter(CommandInterpretation(command_text="open notepad"))
+
+    response = handle_assistant_command(
+        AssistantCommandRequest(text="open calculator"),
+        launcher=launcher,
+        command_interpreter=interpreter,
+        command_interpreter_provider="openai",
+    )
+
+    assert response.message == "Opening Calculator."
+    assert launcher.commands == [["calc.exe"]]
+    assert interpreter.calls == []
+
+
+def test_natural_language_fixed_command_executes_through_local_allowlist(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    launcher = RecordingLauncher()
+    interpreter = FakeCommandInterpreter(
+        CommandInterpretation(command_text="open notepad")
+    )
+
+    response = handle_assistant_command(
+        AssistantCommandRequest(text="Could you please open Notepad for me?"),
+        launcher=launcher,
+        command_interpreter=interpreter,
+        command_interpreter_provider="openai",
+    )
+
+    assert response.intent == "open_app"
+    assert response.status == "executed"
+    assert response.message == "Opening Notepad."
+    assert launcher.commands == [["notepad.exe"]]
+    assert interpreter.calls == ["Could you please open Notepad for me?"]
+
+
+def test_natural_language_note_reminder_and_search_use_existing_validation(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    note_store = NoteStore(tmp_path / "notes")
+    reminder_service = ReminderService(
+        tmp_path / "reminders.json",
+        timer_factory=FakeTimerFactory(),
+    )
+    launcher = RecordingLauncher()
+
+    note_response = handle_assistant_command(
+        AssistantCommandRequest(text="Remember that milk is low"),
+        note_store=note_store,
+        command_interpreter=FakeCommandInterpreter(
+            CommandInterpretation(command_text="note Buy milk")
+        ),
+        command_interpreter_provider="openai",
+    )
+    reminder_response = handle_assistant_command(
+        AssistantCommandRequest(text="Remind me to stretch soon"),
+        reminder_service=reminder_service,
+        command_interpreter=FakeCommandInterpreter(
+            CommandInterpretation(command_text="remind me in 5 minutes to Stretch")
+        ),
+        command_interpreter_provider="openai",
+    )
+    search_response = handle_assistant_command(
+        AssistantCommandRequest(text="Find FastAPI examples on GitHub"),
+        launcher=launcher,
+        command_interpreter=FakeCommandInterpreter(
+            CommandInterpretation(command_text="search github for fastapi examples")
+        ),
+        command_interpreter_provider="openai",
+    )
+
+    assert note_response.message == "Note saved."
+    assert note_store.count_notes() == 1
+    assert reminder_response.message == "Reminder set for 5 minutes from now."
+    assert len(reminder_service.list_pending_reminders()) == 1
+    assert search_response.message == "Searching GitHub for fastapi examples."
+    assert launcher.commands == [
+        [
+            "rundll32.exe",
+            "url.dll,FileProtocolHandler",
+            "https://github.com/search?q=fastapi+examples",
+        ]
+    ]
+
+
+def test_invalid_interpreted_payload_falls_back_to_unknown(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    response = handle_assistant_command(
+        AssistantCommandRequest(text="Make a private note"),
+        command_interpreter=FakeCommandInterpreter(
+            CommandInterpretation(command_text="note \x01")
+        ),
+        command_interpreter_provider="openai",
+    )
+
+    assert response.intent == "unknown"
+    assert response.status == "not_supported"
+    assert response.message == "That command is not supported yet."
+
+
+def test_unknown_openai_failure_missing_key_and_local_only_modes(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    failing = FailingCommandInterpreter()
+
+    failure_response = handle_assistant_command(
+        AssistantCommandRequest(text="Please do something unsupported"),
+        command_interpreter=failing,
+        command_interpreter_provider="openai",
+    )
+    assert failure_response.intent == "unknown"
+    assert failing.calls == ["Please do something unsupported"]
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    missing_key_messages: list[str] = []
+    missing_key_response = handle_assistant_command(
+        AssistantCommandRequest(text="Please open the notes app"),
+        command_interpreter=FakeCommandInterpreter(
+            CommandInterpretation(command_text="open notepad")
+        ),
+        command_interpreter_provider="openai",
+        on_recoverable_error=missing_key_messages.append,
+    )
+    assert missing_key_response.message == (
+        "Natural-language command understanding needs OPENAI_API_KEY."
+    )
+    assert missing_key_messages == [
+        "Natural-language command understanding needs OPENAI_API_KEY."
+    ]
+
+    local_interpreter = FakeCommandInterpreter(
+        CommandInterpretation(command_text="open notepad")
+    )
+    local_response = handle_assistant_command(
+        AssistantCommandRequest(text="Please open Notepad"),
+        command_interpreter=local_interpreter,
+        command_interpreter_provider="local",
+    )
+    assert local_response.message == "That command is not supported yet."
+    assert local_interpreter.calls == []
+
+
+def test_assistant_clarification_question_and_replies(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    store = ClarificationStore()
+    launcher = RecordingLauncher()
+    interpreter = FakeCommandInterpreter(
+        CommandInterpretation(
+            clarification_question="Did you mean Notepad or Calculator?",
+            clarification_candidates=("open notepad", "open calculator"),
+        )
+    )
+
+    question = handle_assistant_command(
+        AssistantCommandRequest(text="Open the app"),
+        command_interpreter=interpreter,
+        command_interpreter_provider="openai",
+        clarification_store=store,
+    )
+    first = handle_assistant_command(
+        AssistantCommandRequest(text="first option"),
+        launcher=launcher,
+        clarification_store=store,
+    )
+
+    assert question.requires_confirmation is True
+    assert question.message == "Did you mean Notepad or Calculator?"
+    assert first.message == "Opening Notepad."
+    assert launcher.commands == [["notepad.exe"]]
+
+    store.set(["open notepad", "open calculator"])
+    second = handle_assistant_command(
+        AssistantCommandRequest(text="second option"),
+        launcher=launcher,
+        clarification_store=store,
+    )
+    assert second.message == "Opening Calculator."
+
+    store.set(["open notepad"])
+    cancel = handle_assistant_command(
+        AssistantCommandRequest(text="never mind"),
+        launcher=launcher,
+        clarification_store=store,
+    )
+    assert cancel.message == "Cancelled."
+
+    store.set(["open notepad"])
+    unrelated = handle_assistant_command(
+        AssistantCommandRequest(text="open calculator"),
+        launcher=launcher,
+        clarification_store=store,
+    )
+    assert unrelated.message == "Opening Calculator."

@@ -69,6 +69,14 @@ Native voice command transcription uses the local `voice_transcription_provider`
 
 DeskPilot sends only the already-recorded bounded command WAV after wake-word activation. It does not stream continuous microphone audio, does not attach notes/reminders/settings as context, and does not write or retain recordings.
 
+Natural-language command understanding uses the local `voice_command_interpreter_provider` setting:
+
+- `auto`: use OpenAI Responses function calling when `OPENAI_API_KEY` exists, otherwise deterministic-only behavior
+- `local`: deterministic-only behavior
+- `openai`: prefer OpenAI interpretation and show a recoverable message if no key is configured
+
+The interpreter sends only the current transcript and static allowed-command metadata, uses `store=false`, and does not use OpenAI built-in tools.
+
 ## What Is Bundled
 
 The build script packages the native tray app entrypoint and required Python dependencies for:
@@ -77,7 +85,7 @@ The build script packages the native tray app entrypoint and required Python dep
 - local microphone capture through `sounddevice`
 - wake-word integration through `openwakeword`
 - local transcription through `faster-whisper`
-- optional OpenAI transcription through the official `openai` SDK
+- optional OpenAI transcription and natural-language interpretation through the official `openai` SDK
 - local text-to-speech through `pyttsx3`
 
 It does not bundle secrets, notes, reminders, settings, audio recordings, or local model cache directories.

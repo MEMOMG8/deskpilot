@@ -6,6 +6,7 @@ from deskpilot_backend.desktop_voice import (
     apply_native_voice_preferences,
 )
 from deskpilot_backend.settings import (
+    DEFAULT_COMMAND_INTERPRETER_PROVIDER,
     DEFAULT_COMMAND_CAPTURE_DURATION_SECONDS,
     DEFAULT_TRANSCRIPTION_PROVIDER,
     DeskPilotSettings,
@@ -58,6 +59,27 @@ def test_invalid_voice_transcription_provider_falls_back_to_auto() -> None:
 
     assert settings.voice_transcription_provider == DEFAULT_TRANSCRIPTION_PROVIDER
     assert settings.warnings == ("Invalid voice transcription provider; using auto.",)
+
+
+def test_invalid_voice_command_interpreter_provider_falls_back_to_auto() -> None:
+    settings = parse_settings(
+        {
+            "version": 1,
+            "command_capture_duration_seconds": 4,
+            "recording_start_cue_enabled": True,
+            "wake_listening_on_startup": False,
+            "voice_transcription_provider": "auto",
+            "voice_command_interpreter_provider": "cloudy",
+            "custom_aliases": {},
+        }
+    )
+
+    assert settings.voice_command_interpreter_provider == (
+        DEFAULT_COMMAND_INTERPRETER_PROVIDER
+    )
+    assert settings.warnings == (
+        "Invalid voice command interpreter provider; using auto.",
+    )
 
 
 def test_malformed_existing_settings_uses_defaults_without_rewriting(tmp_path) -> None:
@@ -162,6 +184,7 @@ def test_native_startup_preferences_configure_voice_service() -> None:
         recording_start_cue_enabled=False,
         wake_listening_on_startup=True,
         voice_transcription_provider="openai",
+        voice_command_interpreter_provider="local",
         custom_aliases={"open my projects": "open github"},
     )
 
@@ -175,6 +198,7 @@ def test_native_startup_preferences_configure_voice_service() -> None:
     assert should_start_wake is True
     assert service.capture_duration_seconds == 6
     assert service.voice_transcription_provider == "openai"
+    assert service.voice_command_interpreter_provider == "local"
     assert service.custom_aliases == {"open my projects": "open github"}
 
     service.cue_player()
