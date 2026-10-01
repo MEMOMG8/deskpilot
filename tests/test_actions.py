@@ -25,20 +25,26 @@ from deskpilot_backend.main import (
     get_process_launcher,
     get_reminder_service,
     get_settings_store,
+    get_spotify_service,
     get_system_status_reader,
 )
 from deskpilot_backend.models import ActionExecutionRequest
 from deskpilot_backend.notes import NoteStore, format_latest_note, format_note_count
 from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.settings import SettingsStore, default_settings_data
+from deskpilot_backend.spotify import SpotifyNoActiveDeviceError, SpotifyNotConnectedError
+from deskpilot_backend.spotify import SpotifyDevice, SpotifyError
 
 
 class RecordingLauncher:
-    def __init__(self) -> None:
+    def __init__(self, events: list[str] | None = None) -> None:
         self.commands: list[list[str]] = []
+        self.events = events
 
     def __call__(self, command: list[str]) -> object:
         self.commands.append(command)
+        if self.events is not None:
+            self.events.append("launch")
         return object()
 
 
@@ -61,6 +67,76 @@ class RecordingSystemStatusReader:
         return self.messages[target]
 
 
+class FakeSpotifyService:
+    def __init__(
+        self,
+        play_results: list[object] | None = None,
+        device_results: list[object] | None = None,
+        transfer_results: list[object] | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        self.calls: list[tuple[str, object | None]] = []
+        self.play_results = play_results or ["Playing Spotify."]
+        self.device_results = device_results or [[]]
+        self.transfer_results = transfer_results or ["Spotify playback transferred."]
+        self.events = events
+
+    def connect(self) -> str:
+        self.calls.append(("connect", None))
+        return "Spotify connected."
+
+    def disconnect(self) -> str:
+        self.calls.append(("disconnect", None))
+        return "Spotify disconnected."
+
+    def status(self) -> str:
+        self.calls.append(("status", None))
+        return "Spotify Playing: Test Song by Test Artist."
+
+    def play(self) -> str:
+        self.calls.append(("play", None))
+        result = self.play_results.pop(0) if self.play_results else "Playing Spotify."
+        if isinstance(result, Exception):
+            raise result
+        return str(result)
+
+    def available_devices(self) -> list[SpotifyDevice]:
+        self.calls.append(("devices", None))
+        if self.events is not None:
+            self.events.append("devices")
+        result = self.device_results.pop(0) if self.device_results else []
+        if isinstance(result, Exception):
+            raise result
+        return list(result)
+
+    def transfer_playback(self, device_id: str, *, play: bool = True) -> str:
+        self.calls.append(("transfer", (device_id, play)))
+        result = (
+            self.transfer_results.pop(0)
+            if self.transfer_results
+            else "Spotify playback transferred."
+        )
+        if isinstance(result, Exception):
+            raise result
+        return str(result)
+
+    def pause(self) -> str:
+        self.calls.append(("pause", None))
+        return "Pausing Spotify."
+
+    def next_track(self) -> str:
+        self.calls.append(("next", None))
+        return "Skipping to the next Spotify song."
+
+    def previous_track(self) -> str:
+        self.calls.append(("previous", None))
+        return "Going to the previous Spotify song."
+
+    def set_volume(self, volume_percent: int) -> str:
+        self.calls.append(("volume", volume_percent))
+        return f"Spotify volume set to {volume_percent}%."
+
+
 class FakeTimer:
     def __init__(self, delay_seconds, callback) -> None:
         self.delay_seconds = delay_seconds
@@ -81,6 +157,22 @@ class FakeTimerFactory:
         return timer
 
 
+def spotify_device(
+    device_id: str,
+    *,
+    device_type: str = "Computer",
+    is_active: bool = False,
+    is_restricted: bool = False,
+) -> SpotifyDevice:
+    return SpotifyDevice(
+        id=device_id,
+        name=f"Device {device_id}",
+        type=device_type,
+        is_active=is_active,
+        is_restricted=is_restricted,
+    )
+
+
 @pytest.mark.parametrize(
     ("target", "expected_command", "expected_message"),
     [
@@ -93,6 +185,7 @@ class FakeTimerFactory:
             ["rundll32.exe", "url.dll,FileProtocolHandler", "https://example.com"],
             "Opening your default browser.",
         ),
+        ("spotify", ["explorer.exe", "spotify:"], "Opening Spotify."),
     ],
 )
 def test_open_app_actions_are_allowed_with_fixed_commands(
@@ -218,6 +311,411 @@ def test_media_key_actions_are_allowed_with_fixed_key_events(
     assert response.message == expected_message
     assert launcher.commands == []
     assert key_event_sender.events == [(virtual_key, 0), (virtual_key, KEYEVENTF_KEYUP)]
+
+
+@pytest.mark.parametrize(
+    ("target", "expected_call", "expected_message"),
+    [
+        ("connect", ("connect", None), "Spotify connected."),
+        ("disconnect", ("disconnect", None), "Spotify disconnected."),
+        (
+            "status",
+            ("status", None),
+            "Spotify Playing: Test Song by Test Artist.",
+        ),
+        ("play", ("play", None), "Playing Spotify."),
+        ("pause", ("pause", None), "Pausing Spotify."),
+        ("next", ("next", None), "Skipping to the next Spotify song."),
+        ("previous", ("previous", None), "Going to the previous Spotify song."),
+    ],
+)
+def test_spotify_actions_are_allowlisted_and_injected(
+    target: str,
+    expected_call: tuple[str, int | None],
+    expected_message: str,
+) -> None:
+    service = FakeSpotifyService()
+    action = ActionExecutionRequest(type="spotify", target=target)
+
+    response = execute_action(action, spotify_service=service)
+
+    assert response.executed is True
+    assert response.status == "executed"
+    assert response.action == action
+    assert response.message == expected_message
+    assert service.calls == [expected_call]
+
+
+def test_spotify_volume_action_validates_and_uses_fixed_service_method() -> None:
+    service = FakeSpotifyService()
+    action = ActionExecutionRequest(type="spotify", target="volume", query="75")
+
+    response = execute_action(action, spotify_service=service)
+
+    assert response.message == "Spotify volume set to 75%."
+    assert service.calls == [("volume", 75)]
+
+
+@pytest.mark.parametrize("query", [None, "", "loud", "-1", "101"])
+def test_invalid_spotify_volume_action_is_rejected(query: str | None) -> None:
+    service = FakeSpotifyService()
+
+    with pytest.raises(
+        UnsupportedActionError,
+        match="Spotify volume must be between 0 and 100.",
+    ):
+        execute_action(
+            ActionExecutionRequest(type="spotify", target="volume", query=query),
+            spotify_service=service,
+        )
+
+    assert service.calls == []
+
+
+def test_spotify_not_connected_and_no_active_device_are_user_friendly() -> None:
+    class NotConnectedSpotify(FakeSpotifyService):
+        def status(self) -> str:
+            self.calls.append(("status", None))
+            raise SpotifyNotConnectedError(
+                "Spotify is not connected. Say connect spotify."
+            )
+
+    class NoDeviceSpotify(FakeSpotifyService):
+        def play(self) -> str:
+            self.calls.append(("play", None))
+            raise SpotifyNoActiveDeviceError(
+                "No active Spotify device. Open Spotify and play something first."
+            )
+
+    not_connected = NotConnectedSpotify()
+    no_device = NoDeviceSpotify()
+
+    not_connected_response = execute_action(
+        ActionExecutionRequest(type="spotify", target="status"),
+        spotify_service=not_connected,
+    )
+    no_device_response = execute_action(
+        ActionExecutionRequest(type="spotify", target="play"),
+        spotify_service=no_device,
+    )
+
+    assert not_connected_response.message == (
+        "Spotify is not connected. Say connect spotify."
+    )
+    assert no_device_response.message == (
+        "No active Spotify device. Open Spotify and play something first."
+    )
+
+
+def test_default_music_captures_devices_before_launch_and_plays_new_desktop(
+    tmp_path,
+) -> None:
+    events: list[str] = []
+    launcher = RecordingLauncher(events)
+    service = FakeSpotifyService(
+        device_results=[
+            [],
+            [spotify_device("desktop-after-launch")],
+        ],
+        events=events,
+    )
+    sleeps: list[float] = []
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+        settings_store=SettingsStore(tmp_path / "settings.json"),
+        sleeper=sleeps.append,
+    )
+
+    assert response.executed is True
+    assert response.message == "Opening Spotify and playing music."
+    assert launcher.commands == [["explorer.exe", "spotify:"]]
+    assert service.calls == [
+        ("devices", None),
+        ("devices", None),
+        ("transfer", ("desktop-after-launch", True)),
+    ]
+    assert events == ["devices", "launch", "devices"]
+    assert sleeps == []
+
+
+def test_default_music_success_is_not_overridden_by_status_unavailability() -> None:
+    class StatusUnavailableSpotify(FakeSpotifyService):
+        def status(self) -> str:
+            self.calls.append(("status", None))
+            raise SpotifyError("raw status detail")
+
+    launcher = RecordingLauncher()
+    service = StatusUnavailableSpotify(
+        device_results=[
+            [],
+            [spotify_device("desktop-after-launch")],
+        ],
+    )
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+        sleeper=lambda _seconds: None,
+    )
+
+    assert response.message == "Opening Spotify and playing music."
+    assert service.calls == [
+        ("devices", None),
+        ("devices", None),
+        ("transfer", ("desktop-after-launch", True)),
+    ]
+
+
+def test_default_music_waits_for_delayed_desktop_device() -> None:
+    launcher = RecordingLauncher()
+    service = FakeSpotifyService(
+        device_results=[
+            [],
+            [],
+            [],
+            [spotify_device("desktop-after-delay")],
+        ],
+    )
+    sleeps: list[float] = []
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+        sleeper=sleeps.append,
+    )
+
+    assert response.message == "Opening Spotify and playing music."
+    assert launcher.commands == [["explorer.exe", "spotify:"]]
+    assert service.calls == [
+        ("devices", None),
+        ("devices", None),
+        ("devices", None),
+        ("devices", None),
+        ("transfer", ("desktop-after-delay", True)),
+    ]
+    assert sleeps == [0.5, 0.5]
+
+
+def test_default_music_can_use_unambiguous_known_computer_device() -> None:
+    launcher = RecordingLauncher()
+    service = FakeSpotifyService(
+        device_results=[
+            [spotify_device("known-desktop")],
+            [spotify_device("known-desktop")],
+        ],
+    )
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+        sleeper=lambda _seconds: None,
+    )
+
+    assert response.message == "Opening Spotify and playing music."
+    assert service.calls == [
+        ("devices", None),
+        ("devices", None),
+        ("transfer", ("known-desktop", True)),
+    ]
+
+
+def test_default_music_reports_no_active_spotify_device_after_bounded_wait() -> None:
+    launcher = RecordingLauncher()
+    service = FakeSpotifyService(
+        device_results=[[]] * 20,
+    )
+    sleeps: list[float] = []
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+        sleeper=sleeps.append,
+    )
+
+    assert response.message == (
+        "Spotify is open. Start a song there once, then I can control it."
+    )
+    assert launcher.commands == [["explorer.exe", "spotify:"]]
+    assert service.calls == [("devices", None)] * 18
+    assert sleeps == [0.5] * 16
+
+
+@pytest.mark.parametrize(
+    "device",
+    [
+        spotify_device("phone", device_type="Smartphone"),
+        spotify_device("speaker", device_type="Speaker"),
+        spotify_device("tv", device_type="TV"),
+        spotify_device("restricted", is_restricted=True),
+    ],
+)
+def test_default_music_does_not_transfer_to_remote_or_restricted_devices(
+    device: SpotifyDevice,
+) -> None:
+    launcher = RecordingLauncher()
+    service = FakeSpotifyService(device_results=[[], [device]] * 9)
+    sleeps: list[float] = []
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+        sleeper=sleeps.append,
+    )
+
+    assert response.message == (
+        "Spotify is open. Start a song there once, then I can control it."
+    )
+    assert ("transfer", (device.id, True)) not in service.calls
+    assert ("play", None) not in service.calls
+    assert len(sleeps) == 16
+
+
+def test_default_music_does_not_transfer_away_from_active_remote_device() -> None:
+    launcher = RecordingLauncher()
+    service = FakeSpotifyService(
+        device_results=[
+            [spotify_device("phone", device_type="Smartphone", is_active=True)],
+            [
+                spotify_device("phone", device_type="Smartphone", is_active=True),
+                spotify_device("desktop-after-launch"),
+            ],
+        ]
+        * 9,
+    )
+    sleeps: list[float] = []
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+        sleeper=sleeps.append,
+    )
+
+    assert response.message == (
+        "Spotify is open. Start a song there once, then I can control it."
+    )
+    assert ("transfer", ("desktop-after-launch", True)) not in service.calls
+    assert ("play", None) not in service.calls
+    assert len(sleeps) == 16
+
+
+def test_default_music_does_not_transfer_away_from_another_active_computer() -> None:
+    launcher = RecordingLauncher()
+    service = FakeSpotifyService(
+        device_results=[
+            [spotify_device("office-desktop", is_active=True)]
+        ]
+        + [
+            [
+                spotify_device("office-desktop", is_active=True),
+                spotify_device("new-local-desktop"),
+            ]
+        ]
+        * 17,
+    )
+    sleeps: list[float] = []
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+        sleeper=sleeps.append,
+    )
+
+    assert response.message == (
+        "Spotify is open. Start a song there once, then I can control it."
+    )
+    assert ("transfer", ("new-local-desktop", True)) not in service.calls
+    assert ("play", None) not in service.calls
+    assert len(sleeps) == 16
+
+
+def test_default_music_opens_spotify_when_disconnected() -> None:
+    launcher = RecordingLauncher()
+    service = FakeSpotifyService(
+        device_results=[SpotifyNotConnectedError("Spotify is not connected.")]
+    )
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+        sleeper=lambda _seconds: None,
+    )
+
+    assert response.message == (
+        "Spotify is not connected. Say connect spotify to enable voice playback."
+    )
+    assert launcher.commands == [["explorer.exe", "spotify:"]]
+    assert service.calls == [("devices", None)]
+
+
+def test_default_music_launch_failure_does_not_call_spotify_api() -> None:
+    class FailingLauncher:
+        def __init__(self) -> None:
+            self.commands: list[list[str]] = []
+
+        def __call__(self, command: list[str]) -> object:
+            self.commands.append(command)
+            raise OSError("spotify unavailable")
+
+    launcher = FailingLauncher()
+    service = FakeSpotifyService(device_results=[[]])
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+    )
+
+    assert response.message == "I couldn't open Spotify."
+    assert launcher.commands == [["explorer.exe", "spotify:"]]
+    assert service.calls == [("devices", None)]
+
+
+def test_default_music_maps_spotify_api_errors_to_controlled_message() -> None:
+    launcher = RecordingLauncher()
+    service = FakeSpotifyService(device_results=[SpotifyError("raw HTTP detail")])
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+    )
+
+    assert response.message == "Spotify playback is unavailable."
+    assert launcher.commands == [["explorer.exe", "spotify:"]]
+    assert service.calls == [("devices", None)]
+
+
+def test_default_music_maps_transfer_failure_to_controlled_message() -> None:
+    launcher = RecordingLauncher()
+    service = FakeSpotifyService(
+        device_results=[[], [spotify_device("desktop-after-launch")]],
+        transfer_results=[SpotifyError("raw transfer detail")],
+    )
+
+    response = execute_action(
+        ActionExecutionRequest(type="default_music", target="play"),
+        launcher=launcher,
+        spotify_service=service,
+    )
+
+    assert response.message == "Spotify playback is unavailable."
+    assert launcher.commands == [["explorer.exe", "spotify:"]]
+    assert service.calls == [
+        ("devices", None),
+        ("devices", None),
+        ("transfer", ("desktop-after-launch", True)),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -664,6 +1162,16 @@ def test_unsupported_settings_target_is_rejected_and_never_opens_file(tmp_path) 
     assert not settings_store.settings_file.exists()
 
 
+def test_unsupported_spotify_target_is_rejected_without_service_call() -> None:
+    service = FakeSpotifyService()
+    action = ActionExecutionRequest(type="spotify", target="shuffle")
+
+    with pytest.raises(UnsupportedActionError, match="Unsupported action target"):
+        execute_action(action, spotify_service=service)
+
+    assert service.calls == []
+
+
 @pytest.mark.parametrize(
     ("query", "message"),
     [
@@ -835,3 +1343,21 @@ def test_actions_execute_endpoint_uses_temp_settings_store(tmp_path) -> None:
     assert response.json()["message"] == "Opening DeskPilot settings."
     assert settings_store.settings_file.exists()
     assert launcher.commands == [["notepad.exe", str(settings_store.settings_file)]]
+
+
+def test_actions_execute_endpoint_uses_mocked_spotify_service() -> None:
+    service = FakeSpotifyService()
+    client = TestClient(app)
+    app.dependency_overrides[get_spotify_service] = lambda: service
+
+    try:
+        response = client.post(
+            "/api/v1/actions/execute",
+            json={"type": "spotify", "target": "pause"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Pausing Spotify."
+    assert service.calls == [("pause", None)]

@@ -17,6 +17,7 @@ from deskpilot_backend.microphone import (
     encode_wav,
 )
 from deskpilot_backend.models import TranscriptionResponse, VoiceCommandResponse
+from deskpilot_backend.spotify import SpotifyDevice
 
 
 class FakeTranscriptionService:
@@ -74,6 +75,39 @@ class FakeSpeechEngine:
 
     def runAndWait(self) -> None:
         self.completed = True
+
+
+class FakeSpotifyService:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.device_results = [
+            [],
+            [
+                SpotifyDevice(
+                    id="desktop-after-launch",
+                    name="Desktop Spotify",
+                    type="Computer",
+                    is_active=False,
+                    is_restricted=False,
+                )
+            ],
+        ]
+
+    def play(self) -> str:
+        self.calls.append("play")
+        return "Playing Spotify."
+
+    def available_devices(self) -> list[SpotifyDevice]:
+        self.calls.append("devices")
+        return self.device_results.pop(0) if self.device_results else []
+
+    def transfer_playback(self, device_id: str, *, play: bool = True) -> str:
+        self.calls.append(f"transfer:{device_id}:{play}")
+        return "Spotify playback transferred."
+
+    def pause(self) -> str:
+        self.calls.append("pause")
+        return "Pausing Spotify."
 
 
 class FailingCommandInterpreter:
@@ -164,6 +198,67 @@ def test_native_voice_command_can_execute_mocked_media_key_command() -> None:
         (VK_MEDIA_PLAY_PAUSE, KEYEVENTF_KEYUP),
     ]
     assert engine.spoken_text == ["Toggling media playback."]
+
+
+def test_native_voice_command_can_execute_mocked_spotify_command() -> None:
+    wav_audio = encode_wav(b"\x00\x00" * 16000)
+    recorder = FakeRecorder(wav_audio)
+    launcher = RecordingLauncher()
+    spotify_service = FakeSpotifyService()
+    engine = FakeSpeechEngine()
+    service = NativeVoiceCommandService(
+        transcription_service=FakeTranscriptionService("pause spotify"),
+        recorder=recorder,
+        launcher=launcher,
+        spotify_service=spotify_service,
+        speech_engine_factory=lambda: engine,
+        cue_player=no_op_cue,
+    )
+
+    response = service.run()
+
+    assert response.assistant.intent == "spotify"
+    assert response.assistant.status == "executed"
+    assert response.assistant.message == "Pausing Spotify."
+    assert response.assistant.speech_result == "completed"
+    assert launcher.commands == []
+    assert spotify_service.calls == ["pause"]
+    assert engine.spoken_text == ["Pausing Spotify."]
+
+
+def test_native_voice_play_music_uses_default_spotify_flow_and_recovers() -> None:
+    controller = NativeWakeWordCommandController()
+    wav_audio = encode_wav(b"\x00\x00" * 16000)
+    recorder = FakeRecorder(wav_audio)
+    launcher = RecordingLauncher()
+    spotify_service = FakeSpotifyService()
+    engine = FakeSpeechEngine()
+    service = NativeVoiceCommandService(
+        transcription_service=FakeTranscriptionService("play music"),
+        recorder=recorder,
+        launcher=launcher,
+        spotify_service=spotify_service,
+        speech_engine_factory=lambda: engine,
+        cue_player=no_op_cue,
+    )
+
+    controller.enable_wake_word()
+    assert controller.begin_command_after_wake_word() is True
+
+    response = service.run()
+
+    assert response.assistant.intent == "default_music"
+    assert response.assistant.status == "executed"
+    assert response.assistant.message == "Opening Spotify and playing music."
+    assert launcher.commands == [["explorer.exe", "spotify:"]]
+    assert spotify_service.calls == [
+        "devices",
+        "devices",
+        "transfer:desktop-after-launch:True",
+    ]
+    assert engine.spoken_text == ["Opening Spotify and playing music."]
+    assert controller.finish_command() is True
+    assert controller.command_in_progress is False
 
 
 @pytest.mark.parametrize("text", ["cancel", "never mind"])

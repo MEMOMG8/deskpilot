@@ -9,6 +9,7 @@ from deskpilot_backend.commands import (
     APPLICATION_COMMANDS,
     CANCEL_COMMANDS,
     DATE_COMMANDS,
+    DEFAULT_MUSIC_COMMANDS,
     DESKPILOT_SETTINGS_COMMANDS,
     FIXED_SITE_COMMANDS,
     HELP_COMMANDS,
@@ -152,6 +153,7 @@ def fixed_command_ids() -> tuple[str, ...]:
             | set(REMINDER_COMMANDS)
             | set(TIME_COMMANDS)
             | set(DATE_COMMANDS)
+            | set(DEFAULT_MUSIC_COMMANDS)
             | set(CANCEL_COMMANDS)
             | set(HELP_COMMANDS)
         )

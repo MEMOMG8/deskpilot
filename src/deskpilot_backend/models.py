@@ -25,6 +25,8 @@ class CommandAction(BaseModel):
         "note",
         "reminder",
         "deskpilot_settings",
+        "spotify",
+        "default_music",
     ]
     target: Literal[
         "calculator",
@@ -32,6 +34,7 @@ class CommandAction(BaseModel):
         "file_explorer",
         "settings",
         "browser",
+        "spotify",
         "volume_up",
         "volume_down",
         "mute",
@@ -55,6 +58,14 @@ class CommandAction(BaseModel):
         "open_folder",
         "list",
         "open_file",
+        "connect",
+        "disconnect",
+        "status",
+        "play",
+        "pause",
+        "next",
+        "previous",
+        "volume",
     ]
     query: str | None = None
     minutes: int | None = None
@@ -71,6 +82,8 @@ class CommandResponse(BaseModel):
         "notes",
         "reminders",
         "settings",
+        "spotify",
+        "default_music",
         "get_time",
         "get_date",
         "cancel",
@@ -108,6 +121,8 @@ class AssistantCommandResponse(BaseModel):
         "notes",
         "reminders",
         "settings",
+        "spotify",
+        "default_music",
         "get_time",
         "get_date",
         "cancel",

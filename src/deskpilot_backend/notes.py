@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from pathlib import Path
 from secrets import token_hex
+from threading import Lock
 from time import time_ns
+from typing import ClassVar
 
 DEFAULT_NOTES_DIRECTORY = Path.home() / "Documents" / "DeskPilot" / "notes"
 MAX_NOTE_TEXT_LENGTH = 1000
@@ -15,6 +17,8 @@ class NoteStoreError(RuntimeError):
 @dataclass
 class NoteStore:
     notes_directory: Path = DEFAULT_NOTES_DIRECTORY
+    _timestamp_lock: ClassVar[Lock] = Lock()
+    _last_timestamp_ns: ClassVar[int] = 0
 
     def create_note(self, text: str) -> Path:
         self.notes_directory.mkdir(parents=True, exist_ok=True)
@@ -62,7 +66,9 @@ class NoteStore:
 
     @staticmethod
     def _generate_filename() -> str:
-        timestamp = time_ns()
+        with NoteStore._timestamp_lock:
+            timestamp = max(time_ns(), NoteStore._last_timestamp_ns + 1)
+            NoteStore._last_timestamp_ns = timestamp
         return f"note_{timestamp}_{token_hex(4)}.txt"
 
 

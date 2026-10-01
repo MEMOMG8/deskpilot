@@ -93,6 +93,15 @@ def frame_source(frames: list[bytes]):
     return source
 
 
+def counting_frame_source(frames: list[bytes], yielded: list[int]):
+    def source(frame_samples: int, max_frames: int):
+        for index, frame in enumerate(frames[:max_frames], start=1):
+            yielded.append(index)
+            yield frame
+
+    return source
+
+
 @contextmanager
 def mocked_microphone_dependencies(
     recorder: object,
@@ -224,6 +233,7 @@ def test_adaptive_capture_detects_speech_onset_preroll_and_end_silence() -> None
     config = AdaptiveRecordingConfig(
         max_duration_seconds=3,
         frame_duration_ms=100,
+        ambient_calibration_ms=0,
         energy_threshold=1000,
         initial_speech_timeout_seconds=1,
         end_silence_ms=200,
@@ -244,10 +254,87 @@ def test_adaptive_capture_detects_speech_onset_preroll_and_end_silence() -> None
     assert captured[-2:] == [quiet, quiet]
 
 
+def test_adaptive_capture_detects_quiet_normal_speech_after_cue_tail() -> None:
+    cue_tail = pcm_frame(5000)
+    ambient = pcm_frame(15)
+    quiet_speech = pcm_frame(300)
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=5,
+        frame_duration_ms=100,
+        initial_speech_timeout_seconds=3,
+        end_silence_ms=1100,
+        min_speech_ms=300,
+        pre_roll_ms=200,
+        speech_start_frames=2,
+    )
+
+    wav_audio = capture_adaptive_speech_wav(
+        config,
+        frame_source=frame_source(
+            [cue_tail, cue_tail, ambient]
+            + [ambient] * 5
+            + [quiet_speech] * 6
+            + [ambient] * 12
+        ),
+    )
+
+    with wave.open(io.BytesIO(wav_audio), "rb") as wav_file:
+        assert wav_file.getframerate() == SAMPLE_RATE
+        assert wav_file.getnchannels() == 1
+        assert 0 < wav_file.getnframes() < config.max_frames * config.frame_samples
+
+
+def test_adaptive_capture_detects_loud_speech_after_calibration() -> None:
+    ambient = pcm_frame(20)
+    loud_speech = pcm_frame(4000)
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=4,
+        frame_duration_ms=100,
+        min_speech_ms=300,
+        speech_start_frames=2,
+    )
+
+    captured = capture_adaptive_speech_pcm(
+        config,
+        frame_source=frame_source(
+            [ambient] * config.calibration_frames
+            + [ambient] * 4
+            + [loud_speech] * 4
+            + [ambient] * config.end_silence_frames
+        ),
+    )
+
+    assert loud_speech in captured
+
+
+def test_adaptive_capture_uses_ambient_noise_calibration() -> None:
+    ambient_noise = pcm_frame(80)
+    speech = pcm_frame(450)
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=4,
+        frame_duration_ms=100,
+        min_speech_ms=300,
+        speech_start_frames=2,
+    )
+
+    captured = capture_adaptive_speech_pcm(
+        config,
+        frame_source=frame_source(
+            [ambient_noise] * config.calibration_frames
+            + [ambient_noise] * 3
+            + [speech] * 4
+            + [ambient_noise] * config.end_silence_frames
+        ),
+    )
+
+    assert speech in captured
+
+
 def test_adaptive_capture_times_out_without_speech() -> None:
     config = AdaptiveRecordingConfig(
         max_duration_seconds=3,
         frame_duration_ms=100,
+        ambient_calibration_ms=0,
         energy_threshold=1000,
         initial_speech_timeout_seconds=0.3,
     )
@@ -263,12 +350,59 @@ def test_adaptive_capture_times_out_without_speech() -> None:
         raise AssertionError("Expected NoSpeechDetectedError")
 
 
+def test_adaptive_capture_waits_full_initial_timeout_before_no_speech() -> None:
+    ambient = pcm_frame(20)
+    yielded: list[int] = []
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=5,
+        frame_duration_ms=100,
+        initial_speech_timeout_seconds=3,
+        speech_start_frames=2,
+    )
+
+    try:
+        capture_adaptive_speech_pcm(
+            config,
+            frame_source=counting_frame_source([ambient] * 60, yielded),
+        )
+    except NoSpeechDetectedError:
+        assert len(yielded) == config.calibration_frames + config.initial_timeout_frames
+    else:
+        raise AssertionError("Expected NoSpeechDetectedError")
+
+
+def test_adaptive_capture_accepts_delayed_speech_before_timeout() -> None:
+    ambient = pcm_frame(20)
+    speech = pcm_frame(300)
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=5,
+        frame_duration_ms=100,
+        initial_speech_timeout_seconds=3,
+        end_silence_ms=1100,
+        min_speech_ms=300,
+        speech_start_frames=2,
+    )
+
+    captured = capture_adaptive_speech_pcm(
+        config,
+        frame_source=frame_source(
+            [ambient] * config.calibration_frames
+            + [ambient] * 29
+            + [speech] * 4
+            + [ambient] * config.end_silence_frames
+        ),
+    )
+
+    assert speech in captured
+
+
 def test_adaptive_capture_enforces_minimum_speech_duration() -> None:
     quiet = pcm_frame(0)
     speech = pcm_frame(4000)
     config = AdaptiveRecordingConfig(
         max_duration_seconds=3,
         frame_duration_ms=100,
+        ambient_calibration_ms=0,
         energy_threshold=1000,
         initial_speech_timeout_seconds=1,
         end_silence_ms=200,
@@ -293,6 +427,7 @@ def test_adaptive_capture_never_exceeds_hard_maximum_duration() -> None:
     config = AdaptiveRecordingConfig(
         max_duration_seconds=1,
         frame_duration_ms=100,
+        ambient_calibration_ms=0,
         energy_threshold=1000,
         initial_speech_timeout_seconds=1,
         min_speech_ms=200,
@@ -307,10 +442,31 @@ def test_adaptive_capture_never_exceeds_hard_maximum_duration() -> None:
     assert len(captured) == config.max_frames
 
 
+def test_adaptive_capture_default_hard_maximum_includes_calibration() -> None:
+    speech = pcm_frame(4000)
+    yielded: list[int] = []
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=1,
+        frame_duration_ms=100,
+        initial_speech_timeout_seconds=3,
+        min_speech_ms=300,
+        speech_start_frames=2,
+    )
+
+    captured = capture_adaptive_speech_pcm(
+        config,
+        frame_source=counting_frame_source([speech] * 30, yielded),
+    )
+
+    assert len(yielded) == config.max_frames
+    assert len(captured) <= config.max_frames
+
+
 def test_adaptive_capture_rejects_noisy_near_threshold_frames() -> None:
     config = AdaptiveRecordingConfig(
         max_duration_seconds=2,
         frame_duration_ms=100,
+        ambient_calibration_ms=0,
         energy_threshold=1000,
         initial_speech_timeout_seconds=0.5,
         speech_start_frames=2,
@@ -327,12 +483,36 @@ def test_adaptive_capture_rejects_noisy_near_threshold_frames() -> None:
     raise AssertionError("Expected near-threshold frames to be ignored")
 
 
+def test_adaptive_capture_rejects_default_near_threshold_frames() -> None:
+    ambient = pcm_frame(20)
+    near_threshold = pcm_frame(119)
+    config = AdaptiveRecordingConfig(
+        max_duration_seconds=4,
+        frame_duration_ms=100,
+        initial_speech_timeout_seconds=3,
+        speech_start_frames=2,
+    )
+
+    try:
+        capture_adaptive_speech_pcm(
+            config,
+            frame_source=frame_source(
+                [ambient] * config.calibration_frames + [near_threshold] * 40
+            ),
+        )
+    except NoSpeechDetectedError:
+        return
+
+    raise AssertionError("Expected near-threshold frames to be ignored")
+
+
 def test_adaptive_capture_returns_wav_for_final_segment_only() -> None:
     speech = pcm_frame(4000)
     quiet = pcm_frame(0)
     config = AdaptiveRecordingConfig(
         max_duration_seconds=2,
         frame_duration_ms=100,
+        ambient_calibration_ms=0,
         energy_threshold=1000,
         initial_speech_timeout_seconds=1,
         end_silence_ms=200,
@@ -354,3 +534,4 @@ def test_adaptive_capture_returns_wav_for_final_segment_only() -> None:
 def test_frame_energy_is_deterministic_for_pcm_frames() -> None:
     assert frame_energy(pcm_frame(0)) == 0
     assert frame_energy(pcm_frame(2000)) == 2000
+    assert frame_energy(pcm_frame(-2000)) == 2000

@@ -12,6 +12,10 @@ When enabled, natural-language command understanding uses OpenAI Responses funct
 
 Custom aliases can only map a user phrase to an existing fixed command ID. Aliases cannot target arbitrary executables, paths, URLs, shell commands, media controls, parameterized search, notes, or reminders.
 
+Spotify commands are explicitly prefixed with `spotify` or `connect spotify`/`disconnect spotify`, except for the exact `play music` command, which intentionally uses Spotify as the current default music app. Spotify Web API calls affect the active Spotify device only. Generic media commands such as `pause music`, `next song`, and volume controls remain local Windows media-key commands and are not reinterpreted as Spotify commands. DeskPilot does not automate Spotify's desktop UI with clicks or keystrokes.
+
+Spotify OAuth uses Authorization Code with PKCE, a cryptographically random verifier, a cryptographically random state, and the fixed redirect URI `http://127.0.0.1:8765/callback`. DeskPilot requests only `user-read-playback-state user-modify-playback-state`, uses only `SPOTIFY_CLIENT_ID`, and does not use or store a Spotify client secret.
+
 ## Local Storage
 
 DeskPilot stores local app data under `~/Documents/DeskPilot`:
@@ -19,8 +23,9 @@ DeskPilot stores local app data under `~/Documents/DeskPilot`:
 - Settings: `~/Documents/DeskPilot/settings.json`
 - Notes: `~/Documents/DeskPilot/notes/*.txt`
 - Reminders: `~/Documents/DeskPilot/reminders.json`
+- Spotify protected token: `~/Documents/DeskPilot/spotify.bin`
 
-These files are local user data and should not be committed to Git. Audio recordings are processed in memory for microphone capture and should not be committed if manually created during testing.
+The Spotify token file is encrypted with Windows DPAPI for the current user. Plaintext tokens, OAuth authorization codes, PKCE verifiers, sensitive headers, notes, reminders, settings, and audio recordings should not be committed to Git. Audio recordings are processed in memory for microphone capture and should not be committed if manually created during testing.
 
 ## Local Processing
 
@@ -31,7 +36,7 @@ DeskPilot uses local components for wake-word behavior, action execution, and te
 - Text-to-speech: local Windows SAPI through `pyttsx3`
 - Command understanding: deterministic local parser first; optional OpenAI Responses function calling only for unknown natural-language phrasing
 
-DeskPilot does not stream continuous microphone audio. It does not send notes, reminders, settings, history, file contents, local paths, or API keys to OpenAI as context. It must never log, print, store, or commit `OPENAI_API_KEY`.
+DeskPilot does not stream continuous microphone audio. It does not send notes, reminders, settings, history, file contents, local paths, or API keys to OpenAI as context. It must never log, print, store, or commit `OPENAI_API_KEY`, `SPOTIFY_CLIENT_ID`, Spotify access tokens, Spotify refresh tokens, OAuth authorization codes, PKCE verifiers, or sensitive request headers.
 
 ## Supported Platforms
 

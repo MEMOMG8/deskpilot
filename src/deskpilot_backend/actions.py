@@ -2,6 +2,7 @@ import ctypes
 import os
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,14 @@ from deskpilot_backend.reminders import (
     ReminderStoreError,
 )
 from deskpilot_backend.settings import SettingsStore, SettingsStoreError
+from deskpilot_backend.spotify import (
+    SpotifyDevice,
+    SpotifyError,
+    SpotifyNoActiveDeviceError,
+    SpotifyNotConnectedError,
+    SpotifyOAuthError,
+    SpotifyService,
+)
 
 OPEN_APP_ACTION_TYPE = "open_app"
 MEDIA_KEY_ACTION_TYPE = "media_key"
@@ -32,7 +41,13 @@ WEB_SEARCH_ACTION_TYPE = "web_search"
 NOTE_ACTION_TYPE = "note"
 REMINDER_ACTION_TYPE = "reminder"
 DESKPILOT_SETTINGS_ACTION_TYPE = "deskpilot_settings"
+SPOTIFY_ACTION_TYPE = "spotify"
+DEFAULT_MUSIC_ACTION_TYPE = "default_music"
 MAX_SEARCH_QUERY_LENGTH = 120
+DEFAULT_MUSIC_APP = "spotify"
+SPOTIFY_APP_COMMAND = ("explorer.exe", "spotify:")
+SPOTIFY_ACTIVE_DEVICE_WAIT_SECONDS = 8.0
+SPOTIFY_ACTIVE_DEVICE_POLL_SECONDS = 0.5
 KEYEVENTF_KEYUP = 0x0002
 VK_VOLUME_MUTE = 0xAD
 VK_VOLUME_DOWN = 0xAE
@@ -44,6 +59,7 @@ VK_MEDIA_PLAY_PAUSE = 0xB3
 ProcessLauncher = Callable[[Sequence[str]], object]
 KeyEventSender = Callable[[int, int], object]
 SystemStatusReader = Callable[[str], str]
+SleepFunction = Callable[[float], object]
 
 
 @dataclass(frozen=True)
@@ -60,6 +76,8 @@ class ActionDefinition:
     note_operation: str | None = None
     reminder_operation: str | None = None
     settings_operation: str | None = None
+    spotify_operation: str | None = None
+    default_music_operation: str | None = None
     unsupported_platform_message: str | None = None
 
 
@@ -88,6 +106,12 @@ ACTION_REGISTRY = {
         action_type=OPEN_APP_ACTION_TYPE,
         command=("rundll32.exe", "url.dll,FileProtocolHandler", "https://example.com"),
         message="Opening your default browser.",
+    ),
+    (OPEN_APP_ACTION_TYPE, "spotify"): ActionDefinition(
+        action_type=OPEN_APP_ACTION_TYPE,
+        command=SPOTIFY_APP_COMMAND,
+        message="Opening Spotify.",
+        unsupported_platform_message="Spotify launch is only supported on Windows.",
     ),
     (MEDIA_KEY_ACTION_TYPE, "volume_up"): ActionDefinition(
         action_type=MEDIA_KEY_ACTION_TYPE,
@@ -236,6 +260,52 @@ ACTION_REGISTRY = {
         settings_operation="open_file",
         message="Opening DeskPilot settings.",
     ),
+    (SPOTIFY_ACTION_TYPE, "connect"): ActionDefinition(
+        action_type=SPOTIFY_ACTION_TYPE,
+        spotify_operation="connect",
+        message="Connecting Spotify.",
+    ),
+    (SPOTIFY_ACTION_TYPE, "disconnect"): ActionDefinition(
+        action_type=SPOTIFY_ACTION_TYPE,
+        spotify_operation="disconnect",
+        message="Disconnecting Spotify.",
+    ),
+    (SPOTIFY_ACTION_TYPE, "status"): ActionDefinition(
+        action_type=SPOTIFY_ACTION_TYPE,
+        spotify_operation="status",
+        message="Checking Spotify.",
+    ),
+    (SPOTIFY_ACTION_TYPE, "play"): ActionDefinition(
+        action_type=SPOTIFY_ACTION_TYPE,
+        spotify_operation="play",
+        message="Playing Spotify.",
+    ),
+    (SPOTIFY_ACTION_TYPE, "pause"): ActionDefinition(
+        action_type=SPOTIFY_ACTION_TYPE,
+        spotify_operation="pause",
+        message="Pausing Spotify.",
+    ),
+    (SPOTIFY_ACTION_TYPE, "next"): ActionDefinition(
+        action_type=SPOTIFY_ACTION_TYPE,
+        spotify_operation="next",
+        message="Skipping Spotify.",
+    ),
+    (SPOTIFY_ACTION_TYPE, "previous"): ActionDefinition(
+        action_type=SPOTIFY_ACTION_TYPE,
+        spotify_operation="previous",
+        message="Going to previous Spotify song.",
+    ),
+    (SPOTIFY_ACTION_TYPE, "volume"): ActionDefinition(
+        action_type=SPOTIFY_ACTION_TYPE,
+        spotify_operation="volume",
+        message="Setting Spotify volume.",
+    ),
+    (DEFAULT_MUSIC_ACTION_TYPE, "play"): ActionDefinition(
+        action_type=DEFAULT_MUSIC_ACTION_TYPE,
+        default_music_operation="play",
+        message="Playing music.",
+        unsupported_platform_message="Default music playback is only supported on Windows.",
+    ),
 }
 SUPPORTED_ACTION_TYPES = {action_type for action_type, _target in ACTION_REGISTRY}
 
@@ -252,6 +322,8 @@ def execute_action(
     note_store: NoteStore | None = None,
     reminder_service: ReminderService | None = None,
     settings_store: SettingsStore | None = None,
+    spotify_service: SpotifyService | None = None,
+    sleeper: SleepFunction | None = None,
 ) -> ActionExecutionResponse:
     if action.type not in SUPPORTED_ACTION_TYPES:
         raise UnsupportedActionError(f"Unsupported action type: {action.type}")
@@ -307,6 +379,20 @@ def execute_action(
             settings_store=settings_store,
             launcher=launcher,
         )
+    elif action_definition.spotify_operation is not None:
+        message = execute_spotify_operation(
+            action_definition.spotify_operation,
+            action,
+            spotify_service=spotify_service,
+        )
+    elif action_definition.default_music_operation is not None:
+        message = execute_default_music_operation(
+            action_definition.default_music_operation,
+            launcher=launcher,
+            spotify_service=spotify_service,
+            settings_store=settings_store,
+            sleeper=sleeper,
+        )
 
     return ActionExecutionResponse(
         status="executed",
@@ -314,6 +400,192 @@ def execute_action(
         action=action,
         message=message,
     )
+
+
+def execute_spotify_operation(
+    operation: str,
+    action: ActionExecutionRequest,
+    *,
+    spotify_service: SpotifyService | None = None,
+) -> str:
+    service = spotify_service or SpotifyService()
+    try:
+        if operation == "connect":
+            return service.connect()
+        if operation == "disconnect":
+            return service.disconnect()
+        if operation == "status":
+            return service.status()
+        if operation == "play":
+            return service.play()
+        if operation == "pause":
+            return service.pause()
+        if operation == "next":
+            return service.next_track()
+        if operation == "previous":
+            return service.previous_track()
+        if operation == "volume":
+            return service.set_volume(validate_spotify_volume(action.query))
+    except (SpotifyNotConnectedError, SpotifyNoActiveDeviceError) as error:
+        return str(error)
+    except SpotifyOAuthError as error:
+        return str(error)
+    except SpotifyError as error:
+        raise UnsupportedActionError(str(error)) from error
+
+    raise UnsupportedActionError(f"Unsupported Spotify operation: {operation}")
+
+
+def execute_default_music_operation(
+    operation: str,
+    *,
+    launcher: ProcessLauncher | None = None,
+    spotify_service: SpotifyService | None = None,
+    settings_store: SettingsStore | None = None,
+    sleeper: SleepFunction | None = None,
+) -> str:
+    if operation != "play":
+        raise UnsupportedActionError(f"Unsupported default music operation: {operation}")
+
+    if _load_default_music_app(settings_store) != DEFAULT_MUSIC_APP:
+        raise UnsupportedActionError("Default music app is not supported.")
+
+    service = spotify_service or SpotifyService()
+    known_device_ids: set[str] = set()
+    prelaunch_message: str | None = None
+    try:
+        known_device_ids = {device.id for device in service.available_devices()}
+    except SpotifyNotConnectedError:
+        prelaunch_message = (
+            "Spotify is not connected. Say connect spotify to enable voice playback."
+        )
+    except (SpotifyOAuthError, SpotifyError):
+        prelaunch_message = "Spotify playback is unavailable."
+
+    launch_message = launch_spotify(launcher=launcher)
+    if launch_message is not None:
+        return launch_message
+
+    if prelaunch_message is not None:
+        return prelaunch_message
+
+    return play_spotify_after_launch(
+        spotify_service=service,
+        known_device_ids=known_device_ids,
+        sleeper=sleeper,
+    )
+
+
+def launch_spotify(*, launcher: ProcessLauncher | None = None) -> str | None:
+    process_launcher = launcher or subprocess.Popen
+    try:
+        process_launcher(list(SPOTIFY_APP_COMMAND))
+    except OSError:
+        return "I couldn't open Spotify."
+
+    return None
+
+
+def play_spotify_after_launch(
+    *,
+    spotify_service: SpotifyService,
+    known_device_ids: set[str],
+    sleeper: SleepFunction | None = None,
+) -> str:
+    service = spotify_service
+    sleep = sleeper or time.sleep
+    attempts = max(
+        1,
+        int(SPOTIFY_ACTIVE_DEVICE_WAIT_SECONDS / SPOTIFY_ACTIVE_DEVICE_POLL_SECONDS)
+        + 1,
+    )
+
+    for attempt in range(attempts):
+        try:
+            current_devices = service.available_devices()
+            target_device = select_spotify_desktop_device(
+                known_device_ids,
+                current_devices,
+            )
+            if target_device is not None:
+                service.transfer_playback(target_device.id, play=True)
+                return "Opening Spotify and playing music."
+        except SpotifyNotConnectedError:
+            return "Spotify is not connected. Say connect spotify to enable voice playback."
+        except (SpotifyOAuthError, SpotifyError):
+            return "Spotify playback is unavailable."
+
+        if attempt < attempts - 1:
+            sleep(SPOTIFY_ACTIVE_DEVICE_POLL_SECONDS)
+            continue
+
+        return "Spotify is open. Start a song there once, then I can control it."
+
+    return "Spotify is open. Start a song there once, then I can control it."
+
+
+def select_spotify_desktop_device(
+    known_device_ids: set[str],
+    devices: Sequence[SpotifyDevice],
+) -> SpotifyDevice | None:
+    eligible_devices = [device for device in devices if is_eligible_spotify_desktop(device)]
+
+    newly_available = [
+        device for device in eligible_devices if device.id not in known_device_ids
+    ]
+    if len(newly_available) == 1:
+        return _spotify_device_if_not_transferring_from_active_device(
+            newly_available[0],
+            devices,
+        )
+
+    if len(newly_available) > 1:
+        return None
+
+    if len(eligible_devices) == 1:
+        return _spotify_device_if_not_transferring_from_active_device(
+            eligible_devices[0],
+            devices,
+        )
+
+    return None
+
+
+def is_eligible_spotify_desktop(device: SpotifyDevice) -> bool:
+    return (
+        bool(device.id)
+        and device.type.casefold() == "computer"
+        and not device.is_restricted
+    )
+
+
+def _spotify_device_if_not_transferring_from_active_device(
+    candidate: SpotifyDevice,
+    devices: Sequence[SpotifyDevice],
+) -> SpotifyDevice | None:
+    if any(device.is_active and device.id != candidate.id for device in devices):
+        return None
+
+    return candidate
+
+
+def _load_default_music_app(settings_store: SettingsStore | None) -> str:
+    if settings_store is None:
+        return DEFAULT_MUSIC_APP
+
+    try:
+        return settings_store.load_or_create().default_music_app
+    except Exception:
+        return DEFAULT_MUSIC_APP
+
+
+def validate_spotify_volume(raw_volume: str | None) -> int:
+    if raw_volume is None or not raw_volume.isdecimal():
+        raise UnsupportedActionError("Spotify volume must be between 0 and 100.")
+    volume = int(raw_volume)
+    if volume < 0 or volume > 100:
+        raise UnsupportedActionError("Spotify volume must be between 0 and 100.")
+    return volume
 
 
 def execute_settings_operation(

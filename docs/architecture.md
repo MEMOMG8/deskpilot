@@ -14,13 +14,14 @@ flowchart LR
     F -->|clarify or unknown| H[Local response]
     G --> I[Local TTS\npyttsx3 / SAPI]
     G --> J[Tray notification\nPySide6]
+    G --> K[Optional Spotify Web API\nactive device only]
 ```
 
 ## Native Flow
 
 The native shell runs with `python -m deskpilot_backend.desktop`. Wake-word listening is off by default unless local settings enable it. When enabled, openWakeWord listens locally for "Hey Jarvis". On detection, DeskPilot stops the wake-word microphone stream and starts local adaptive command endpointing.
 
-Endpointing is deterministic and local. DeskPilot reads short 16 kHz mono PCM frames, waits for consecutive frames above an energy threshold, keeps a small pre-roll so command starts are not clipped, and ends capture after sustained trailing silence. The existing command capture duration setting remains the hard maximum, so noisy environments cannot keep the microphone open beyond the validated local limit. If no speech is detected, no audio is sent to transcription and DeskPilot reports that it did not hear a command.
+Endpointing is deterministic and local. DeskPilot reads short 16 kHz mono signed PCM frames, briefly calibrates against ambient audio after the recording cue, waits up to 3 seconds for consecutive frames above an adaptive RMS energy threshold, keeps a small pre-roll so command starts are not clipped, and ends capture after about 1.1 seconds of sustained trailing silence. The existing command capture duration setting remains the hard maximum, so noisy environments cannot keep the microphone open beyond the validated local limit. If no speech is detected, no audio is sent to transcription and DeskPilot reports that it did not hear a command.
 
 Only the final bounded command WAV segment is sent to the selected transcription provider. The rest of the flow routes the resulting text through the deterministic command router and executes only allowlisted actions.
 
@@ -41,11 +42,15 @@ The interpreter cannot execute anything. It may propose one existing fixed comma
 
 ## Allowlisted Execution
 
-`actions.py` is the execution boundary. It uses fixed action types and targets for applications, websites, searches, media keys, workspace shortcuts, system status, notes, reminders, and settings. DeskPilot never passes arbitrary text to a shell, executable path, URL opener, or filesystem path.
+`actions.py` is the execution boundary. It uses fixed action types and targets for applications, websites, searches, media keys, Spotify controls, workspace shortcuts, system status, notes, reminders, and settings. DeskPilot never passes arbitrary text to a shell, executable path, URL opener, or filesystem path.
+
+Spotify is an optional connector behind the same allowlisted action boundary. `connect spotify` starts a browser-based Authorization Code flow with PKCE using only `SPOTIFY_CLIENT_ID`, the fixed redirect URI `http://127.0.0.1:8765/callback`, and the scopes `user-read-playback-state user-modify-playback-state`. A temporary callback server binds only to `127.0.0.1:8765`, validates state, accepts one callback, and shuts down. Explicit Spotify playback commands call fixed Spotify HTTPS endpoints for the user's active device.
+
+`play music` is the one generic music command that uses Spotify as the current default music app. Local code snapshots known Spotify devices, launches only the fixed Spotify Windows protocol target, then polls briefly for an eligible local `Computer` Spotify device. It transfers playback only to that desktop device with playback enabled, never to phones, speakers, TVs, or restricted devices. Other generic media commands, such as `pause music`, `next song`, and volume controls, remain fixed Windows media-key actions.
 
 ## Settings
 
-Settings are stored in `~/Documents/DeskPilot/settings.json` and created only when missing. They control command capture duration, recording-start cue, wake listening on startup, transcription provider, command interpreter provider, and safe custom aliases. Invalid settings fall back to safe defaults without rewriting the user's file.
+Settings are stored in `~/Documents/DeskPilot/settings.json` and created only when missing. They control command capture duration, recording-start cue, wake listening on startup, transcription provider, command interpreter provider, default music app, and safe custom aliases. Invalid settings fall back to safe defaults without rewriting the user's file.
 
 Custom aliases can only map a user phrase to an existing fixed command, such as `"open my projects": "open github"`. Aliases cannot target media controls, notes, reminders, parameterized search, arbitrary URLs, paths, shell commands, or executables.
 
@@ -55,6 +60,8 @@ Notes are local UTF-8 `.txt` files under `~/Documents/DeskPilot/notes`. DeskPilo
 
 Reminders are stored in `~/Documents/DeskPilot/reminders.json`. Pending reminders are reloaded on startup and scheduled locally. When due, DeskPilot shows a native tray notification and narrates `Reminder: <text>` using local TTS.
 
+Spotify refresh tokens are stored under `~/Documents/DeskPilot` encrypted with Windows DPAPI for the current user. Access-token metadata is stored with the protected token and refreshed automatically when expired. `disconnect spotify` deletes only this local protected token.
+
 ## Safety Boundaries
 
-DeskPilot is English-only and local-first. Optional OpenAI transcription and command interpretation are explicitly configured by environment/settings and may incur API cost. DeskPilot does not execute arbitrary commands, accept arbitrary paths or URLs, run shell commands, call OpenAI built-in tools, or listen continuously for full speech transcription. Wake-word detection only triggers a short bounded command capture.
+DeskPilot is English-only and local-first. Optional OpenAI transcription and command interpretation are explicitly configured by environment/settings and may incur API cost. Optional Spotify control requires the user to connect Spotify explicitly and uses no client secret. DeskPilot does not execute arbitrary commands, accept arbitrary paths or URLs, run shell commands, automate desktop UI clicks, call OpenAI built-in tools, or listen continuously for full speech transcription. Wake-word detection only triggers a short bounded command capture.

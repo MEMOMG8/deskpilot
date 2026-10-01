@@ -52,6 +52,7 @@ def test_invalid_voice_transcription_provider_falls_back_to_auto() -> None:
             "command_capture_duration_seconds": 4,
             "recording_start_cue_enabled": True,
             "wake_listening_on_startup": False,
+            "default_music_app": "spotify",
             "voice_transcription_provider": "cloudy",
             "custom_aliases": {},
         }
@@ -59,6 +60,22 @@ def test_invalid_voice_transcription_provider_falls_back_to_auto() -> None:
 
     assert settings.voice_transcription_provider == DEFAULT_TRANSCRIPTION_PROVIDER
     assert settings.warnings == ("Invalid voice transcription provider; using auto.",)
+
+
+def test_invalid_default_music_app_falls_back_to_spotify() -> None:
+    settings = parse_settings(
+        {
+            "version": 1,
+            "command_capture_duration_seconds": 4,
+            "recording_start_cue_enabled": True,
+            "wake_listening_on_startup": False,
+            "default_music_app": "other",
+            "custom_aliases": {},
+        }
+    )
+
+    assert settings.default_music_app == "spotify"
+    assert settings.warnings == ("Invalid default music app; using spotify.",)
 
 
 def test_invalid_voice_command_interpreter_provider_falls_back_to_auto() -> None:
@@ -167,12 +184,13 @@ def test_custom_alias_rejects_unsupported_targets_and_parameterized_aliases() ->
                 "search google for": "open github",
                 "search google for cats": "open github",
                 "take a note cats": "open github",
+                "stop spotify": "pause spotify",
             },
         }
     )
 
     assert settings.custom_aliases == {}
-    assert len(settings.warnings) == 5
+    assert len(settings.warnings) == 6
 
 
 def test_native_startup_preferences_configure_voice_service() -> None:

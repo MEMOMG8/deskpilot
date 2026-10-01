@@ -33,6 +33,8 @@ MAX_COMMAND_CAPTURE_DURATION_SECONDS = 8
 MAX_ALIAS_LENGTH = 80
 ALLOWED_TRANSCRIPTION_PROVIDERS = {"auto", "local", "openai"}
 ALLOWED_COMMAND_INTERPRETER_PROVIDERS = {"auto", "local", "openai"}
+DEFAULT_MUSIC_APP = "spotify"
+ALLOWED_DEFAULT_MUSIC_APPS = {DEFAULT_MUSIC_APP}
 
 
 class SettingsStoreError(RuntimeError):
@@ -53,6 +55,7 @@ class DeskPilotSettings:
     voice_command_interpreter_provider: InterpreterProvider = (
         DEFAULT_COMMAND_INTERPRETER_PROVIDER
     )
+    default_music_app: str = DEFAULT_MUSIC_APP
     custom_aliases: dict[str, str] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
 
@@ -89,6 +92,7 @@ BUILT_IN_COMMANDS = SAFE_ALIAS_TARGET_COMMANDS | {
     "open notes folder",
     "list reminders",
     "what are my reminders",
+    "set spotify volume to",
 }
 
 
@@ -102,6 +106,7 @@ def default_settings_data() -> dict[str, Any]:
         "wake_listening_on_startup": False,
         "voice_transcription_provider": DEFAULT_TRANSCRIPTION_PROVIDER,
         "voice_command_interpreter_provider": DEFAULT_COMMAND_INTERPRETER_PROVIDER,
+        "default_music_app": DEFAULT_MUSIC_APP,
         "custom_aliases": {},
     }
 
@@ -185,6 +190,10 @@ def parse_settings(raw_settings: object) -> DeskPilotSettings:
         ),
         warnings,
     )
+    default_music_app = _parse_default_music_app(
+        raw_settings.get("default_music_app", DEFAULT_MUSIC_APP),
+        warnings,
+    )
     custom_aliases = parse_custom_aliases(
         raw_settings.get("custom_aliases"),
         warnings=warnings,
@@ -196,6 +205,7 @@ def parse_settings(raw_settings: object) -> DeskPilotSettings:
         wake_listening_on_startup=wake_listening_on_startup,
         voice_transcription_provider=voice_transcription_provider,
         voice_command_interpreter_provider=voice_command_interpreter_provider,
+        default_music_app=default_music_app,
         custom_aliases=custom_aliases,
         warnings=tuple(warnings),
     )
@@ -307,6 +317,14 @@ def _parse_command_interpreter_provider(
     return DEFAULT_COMMAND_INTERPRETER_PROVIDER
 
 
+def _parse_default_music_app(raw_value: object, warnings: list[str]) -> str:
+    if isinstance(raw_value, str) and raw_value in ALLOWED_DEFAULT_MUSIC_APPS:
+        return raw_value
+
+    warnings.append("Invalid default music app; using spotify.")
+    return DEFAULT_MUSIC_APP
+
+
 def _is_valid_alias_phrase(alias: str, normalized_alias: str) -> bool:
     if not normalized_alias:
         return False
@@ -325,6 +343,7 @@ def _is_parameterized_command_phrase(normalized_alias: str) -> bool:
         or normalized_alias.startswith(search_prefixes)
         or normalized_alias.startswith(note_prefixes)
         or normalized_alias.startswith("remind me in ")
+        or normalized_alias.startswith("set spotify volume to ")
     )
 
 

@@ -24,6 +24,7 @@ from deskpilot_backend.notes import NoteStore
 from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.settings import DeskPilotSettings, SettingsStore
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
+from deskpilot_backend.spotify import SpotifyService
 
 
 def handle_assistant_command(
@@ -34,6 +35,7 @@ def handle_assistant_command(
     note_store: NoteStore | None = None,
     reminder_service: ReminderService | None = None,
     settings_store: SettingsStore | None = None,
+    spotify_service: SpotifyService | None = None,
     speech_engine_factory: SpeechEngineFactory | None = None,
     custom_aliases: Mapping[str, str] | None = None,
     command_interpreter: CommandInterpreter | None = None,
@@ -79,6 +81,7 @@ def handle_assistant_command(
                 note_store=note_store,
                 reminder_service=reminder_service,
                 settings_store=settings_store,
+                spotify_service=spotify_service,
                 speech_engine_factory=speech_engine_factory,
             )
 
@@ -101,6 +104,7 @@ def handle_assistant_command(
         note_store=note_store,
         reminder_service=reminder_service,
         settings_store=settings_store,
+        spotify_service=spotify_service,
         speech_engine_factory=speech_engine_factory,
     )
 
@@ -115,6 +119,7 @@ def _execute_routed_command(
     note_store: NoteStore | None = None,
     reminder_service: ReminderService | None = None,
     settings_store: SettingsStore | None = None,
+    spotify_service: SpotifyService | None = None,
     speech_engine_factory: SpeechEngineFactory | None = None,
 ) -> AssistantCommandResponse:
     if routed_command.action is None:
@@ -139,6 +144,7 @@ def _execute_routed_command(
         note_store=note_store,
         reminder_service=reminder_service,
         settings_store=settings_store,
+        spotify_service=spotify_service,
     )
 
     response = AssistantCommandResponse(

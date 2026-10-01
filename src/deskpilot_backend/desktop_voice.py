@@ -25,6 +25,7 @@ from deskpilot_backend.notes import NoteStore
 from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.settings import DeskPilotSettings, SettingsStore
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
+from deskpilot_backend.spotify import SpotifyService
 from deskpilot_backend.transcription import (
     EmptyAudioError,
     ProviderTranscriptionService,
@@ -76,6 +77,7 @@ class NativeVoiceCommandService:
     note_store: NoteStore | None = None
     reminder_service: ReminderService | None = None
     settings_store: SettingsStore | None = None
+    spotify_service: SpotifyService | None = None
     speech_engine_factory: SpeechEngineFactory | None = None
     cue_player: CuePlayer = play_recording_start_cue
     on_processing_started: ProgressCallback | None = None
@@ -109,6 +111,7 @@ class NativeVoiceCommandService:
                 note_store=self.note_store,
                 reminder_service=self.reminder_service,
                 settings_store=self.settings_store,
+                spotify_service=self.spotify_service,
                 custom_aliases=self.custom_aliases,
                 command_interpreter=self._get_command_interpreter(),
                 command_interpreter_provider=self.voice_command_interpreter_provider,

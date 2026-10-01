@@ -28,6 +28,13 @@ Optional custom alias setup:
 
 3. Restart the tray app so the native shell reloads settings.
 
+Optional Spotify setup:
+
+1. Create a Spotify Developer app with redirect URI `http://127.0.0.1:8765/callback`.
+2. Set `$env:SPOTIFY_CLIENT_ID = "your_spotify_client_id"` before starting DeskPilot.
+3. Say or type `connect spotify` once and approve in the browser.
+4. Keep Spotify installed. For automatic playback control, connect once and keep an active Spotify device available.
+
 ## 90-Second Walkthrough
 
 1. Start with the tray app visible.
@@ -62,7 +69,12 @@ Optional custom alias setup:
    - Say: "open my projects."
    - Expected: DeskPilot opens GitHub because the alias maps to the existing fixed command `open github`.
 
-8. Show safety behavior.
+8. Optional: show Spotify active-device control.
+   - Say: "Hey Jarvis."
+   - Say: "play music."
+   - Expected: DeskPilot opens Spotify. If Spotify is connected and an active device becomes available, DeskPilot resumes playback.
+
+9. Show safety behavior.
    - Say: "Hey Jarvis."
    - Say an unsupported command, such as "open random program."
    - Expected: no action executes, the border briefly turns red, and DeskPilot says: "I didn't catch that. Say help for available commands."

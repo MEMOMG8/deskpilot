@@ -197,5 +197,6 @@ def test_interpreter_tools_derive_fixed_command_ids_and_exclude_builtins() -> No
 
     assert "open notepad" in command_ids
     assert "open calculator" in command_ids
+    assert "play music" in command_ids
     assert "search google for" not in command_ids
     assert all(tool["type"] == "function" for tool in tools)

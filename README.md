@@ -8,9 +8,10 @@ DeskPilot is a local-first Windows voice assistant that demonstrates safe native
 - Push-to-talk browser demo and API endpoints for typed, uploaded-audio, and microphone commands
 - Configurable command transcription: automatic OpenAI `gpt-transcribe` when `OPENAI_API_KEY` is set, or local `faster-whisper` fallback
 - Optional OpenAI natural-language command understanding for unsupported phrasing, with strict function schemas and local allowlist validation
+- Optional Spotify Web API connection using Authorization Code with PKCE and no client secret
 - Local Windows SAPI text-to-speech through `pyttsx3`
 - Deterministic English command router remains the first path for every command
-- Strict allowlisted execution for apps, fixed websites, bounded search, media keys, workspace shortcuts, notes, reminders, and settings
+- Strict allowlisted execution for apps, fixed websites, bounded search, media keys, Spotify active-device controls, workspace shortcuts, notes, reminders, and settings
 - Local notes, reminders, and settings stored under `~/Documents/DeskPilot`
 - Unit-tested services with mocked microphone, speech, wake word, process launching, and timers
 
@@ -23,6 +24,8 @@ Native wake-word commands can optionally use OpenAI `gpt-transcribe` for the alr
 Cloud interpretation never executes actions. It may only propose a strict typed outcome, and local DeskPilot code validates that outcome through the existing command router and allowlisted executor. If OpenAI transcription or interpretation is unavailable, DeskPilot falls back to local behavior when possible.
 
 Safety is enforced with deterministic parsing and explicit allowlists. DeskPilot does not execute arbitrary text, shell commands, paths, URLs, or user-provided executables. Search queries are URL-encoded into trusted search endpoints, and custom aliases may only point to already-supported fixed commands.
+
+Spotify support uses the official Spotify Web API. DeskPilot opens the browser only after the explicit `connect spotify` command, requests only playback-state and playback-control scopes, stores the refresh token locally with Windows DPAPI for the current user, and controls only the user's active Spotify device. It does not use a Spotify client secret and does not automate Spotify's desktop UI with clicks or keystrokes.
 
 See [SECURITY.md](SECURITY.md) for the safety model and disclosure guidance.
 
@@ -56,7 +59,7 @@ With the API running, open `http://127.0.0.1:8000`, click `Talk (4 seconds)`, an
 
 ## Native Voice Demo
 
-Start the tray app, choose `Start wake word listening`, say "Hey Jarvis", then speak a supported command while the cyan listening border is visible. DeskPilot plays a short local Windows cue when command listening begins, stops the wake-word microphone stream, waits locally for speech onset, keeps a small pre-roll, captures until short trailing silence, then sends only that bounded final command segment to the selected transcription provider. It runs the allowlisted assistant flow, narrates the response with local TTS, hides the border, and resumes wake-word listening if it is still enabled.
+Start the tray app, choose `Start wake word listening`, say "Hey Jarvis", then speak a supported command while the cyan listening border is visible. DeskPilot plays a short local Windows cue when command listening begins, stops the wake-word microphone stream, calibrates briefly against local ambient audio, waits up to 3 seconds for speech onset, keeps a small pre-roll, captures until about 1.1 seconds of trailing silence, then sends only that bounded final command segment to the selected transcription provider. It runs the allowlisted assistant flow, narrates the response with local TTS, hides the border, and resumes wake-word listening if it is still enabled.
 
 If no speech is detected during the bounded initial listening window, DeskPilot does not transcribe anything and gives concise recoverable feedback: `I didn't hear a command.`
 
@@ -77,6 +80,30 @@ python -m deskpilot_backend.desktop
 ```
 
 Do not commit API keys. With the default `auto` providers, DeskPilot uses OpenAI only when this environment variable exists; otherwise it preserves local transcription and deterministic command routing. OpenAI usage may incur API cost.
+
+## Spotify Setup
+
+Spotify controls are optional. They require a Spotify account with playback-control support, a Spotify Premium account for many playback-control API operations, and an active Spotify device.
+
+1. Create a Spotify Developer app at `https://developer.spotify.com/dashboard`.
+2. Add this exact redirect URI to the app:
+
+```text
+http://127.0.0.1:8765/callback
+```
+
+3. Copy the app's Client ID. Do not create, use, or store a client secret.
+4. Start DeskPilot with the Client ID in the environment:
+
+```powershell
+$env:SPOTIFY_CLIENT_ID = "your_spotify_client_id"
+python -m deskpilot_backend.desktop
+```
+
+5. Say or type `connect spotify`. DeskPilot opens your browser for Spotify authorization, accepts one localhost callback on `127.0.0.1:8765`, then stores the protected refresh token under `~/Documents/DeskPilot`.
+6. Open Spotify once if Windows asks which app should handle `spotify:` links. Then use commands such as `play music`, `spotify status`, `pause spotify`, or `set spotify volume to 50`.
+
+Use `disconnect spotify` to delete the local protected token. DeskPilot never stores plaintext Spotify tokens in `settings.json`.
 
 ## Tests
 
@@ -104,6 +131,7 @@ DeskPilot stores local preferences in `~/Documents/DeskPilot/settings.json`. The
   "wake_listening_on_startup": false,
   "voice_transcription_provider": "auto",
   "voice_command_interpreter_provider": "auto",
+  "default_music_app": "spotify",
   "custom_aliases": {}
 }
 ```
@@ -125,6 +153,8 @@ Invalid provider values use `auto`.
 - `openai`: prefer OpenAI interpretation and show a recoverable message if no key is configured
 
 The interpreter uses `store=false`, strict function schemas, no OpenAI built-in tools, and one tool call. Returned tool arguments are validated locally before any action can run.
+
+`default_music_app` controls the exact `play music` command. Only `spotify` is supported for now; invalid values safely fall back to `spotify`.
 
 Custom aliases map one fixed phrase to an existing fixed command ID:
 
@@ -164,6 +194,17 @@ Application commands:
 Settings commands:
 
 - `open deskpilot settings`
+
+Spotify commands:
+
+- `connect spotify`
+- `disconnect spotify`
+- `spotify status`
+- `play spotify`
+- `pause spotify`
+- `next spotify song`
+- `previous spotify song`
+- `set spotify volume to 50`
 
 Fixed-site commands:
 
@@ -238,7 +279,11 @@ Media commands:
 - `previous song`
 - `previous track`
 
-Media controls use fixed Windows virtual media keys and affect the active Windows media session. Workspace shortcuts use fixed Windows targets only. Folder shortcuts are derived from known local user directories; DeskPilot never accepts spoken paths. System status commands are read-only and use standard-library or Windows `ctypes` calls.
+`play music` opens the installed Spotify desktop app with a fixed Windows protocol target, waits briefly for the local Spotify desktop device to appear, transfers playback to that Computer device with playback enabled, and resumes playback through Spotify's Web API. If Spotify is not connected, DeskPilot still opens Spotify safely and asks you to say `connect spotify` to enable voice playback. DeskPilot will not automatically take control of a phone, speaker, TV, or restricted Spotify device.
+
+Other media controls use fixed Windows virtual media keys and affect the active Windows media session. Workspace shortcuts use fixed Windows targets only. Folder shortcuts are derived from known local user directories; DeskPilot never accepts spoken paths. System status commands are read-only and use standard-library or Windows `ctypes` calls.
+
+Spotify commands use HTTPS requests to Spotify's Web API. Generic media commands such as `pause music`, `next song`, and `previous track` remain Windows media-key commands and are not reinterpreted as Spotify commands.
 
 Fixed-site commands use exact allowlisted HTTPS URLs. Search commands encode the query into the trusted search site's `q` parameter and open the results in the default browser; DeskPilot does not make direct HTTP requests.
 

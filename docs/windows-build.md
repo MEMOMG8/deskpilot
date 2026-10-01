@@ -51,6 +51,21 @@ $env:OPENAI_API_KEY = "your_api_key_here"
 
 Do not commit or print real API keys.
 
+To enable optional Spotify controls in the packaged tray app, create a Spotify Developer app with this exact redirect URI:
+
+```text
+http://127.0.0.1:8765/callback
+```
+
+Then set only the Client ID before launching:
+
+```powershell
+$env:SPOTIFY_CLIENT_ID = "your_spotify_client_id"
+.\dist\DeskPilot\DeskPilot.exe
+```
+
+Do not create, use, document, or store a Spotify client secret. Run `connect spotify` once from DeskPilot to open the browser-based PKCE authorization flow.
+
 ## First-Run Behavior
 
 User-created data is not bundled into the application. DeskPilot keeps settings, notes, and reminders under:
@@ -58,6 +73,8 @@ User-created data is not bundled into the application. DeskPilot keeps settings,
 ```text
 ~/Documents/DeskPilot/
 ```
+
+Spotify refresh tokens are also stored under this user-data area as a Windows DPAPI-protected token file for the current user. The build does not bundle Spotify tokens, OAuth callback data, settings, notes, reminders, audio recordings, or local model caches.
 
 The first use of wake-word detection may download/cache the local openWakeWord `hey_jarvis` model. If local transcription is used, the first real transcription may download/cache the local `tiny.en` faster-whisper model. These model caches are local machine state and are intentionally not committed or bundled from a developer workstation.
 
@@ -86,6 +103,7 @@ The build script packages the native tray app entrypoint and required Python dep
 - wake-word integration through `openwakeword`
 - local transcription through `faster-whisper`
 - optional OpenAI transcription and natural-language interpretation through the official `openai` SDK
+- optional Spotify Web API controls implemented with the Python standard library
 - local text-to-speech through `pyttsx3`
 
 It does not bundle secrets, notes, reminders, settings, audio recordings, or local model cache directories.
@@ -95,6 +113,9 @@ It does not bundle secrets, notes, reminders, settings, audio recordings, or loc
 - If `PyInstaller is not installed`, run `python -m pip install -e ".[dev]"`.
 - If wake-word startup fails on first run, start the app from PowerShell during troubleshooting so any logged traceback is visible.
 - If OpenAI transcription does not run, confirm `OPENAI_API_KEY` is set in the same PowerShell session used to launch DeskPilot.
+- If `play music` does not open Spotify, confirm the Spotify desktop app is installed and that Windows handles the `spotify:` protocol.
+- If Spotify connection does not start, confirm `SPOTIFY_CLIENT_ID` is set in the same PowerShell session and that the Spotify Developer app has the exact redirect URI `http://127.0.0.1:8765/callback`.
+- If Spotify controls report no active device, open Spotify, start playback manually, and try the command again. Spotify playback-control APIs may require Spotify Premium.
 - If local transcription fails on first use, confirm the machine can download/cache the `tiny.en` model or that the model is already available in the local Hugging Face cache.
 - If audio capture fails, check Windows microphone privacy permissions and the default recording device.
 - If local TTS fails, verify Windows SAPI voices are available on the machine.

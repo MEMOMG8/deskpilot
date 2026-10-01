@@ -161,7 +161,6 @@ def test_commands_endpoint_rejects_invalid_search_query() -> None:
         ("turn volume down", "volume_down"),
         ("mute", "mute"),
         ("mute volume", "mute"),
-        ("play music", "play_pause"),
         ("pause music", "play_pause"),
         ("next song", "next_track"),
         ("next track", "next_track"),
@@ -322,6 +321,86 @@ def test_unknown_media_like_command_is_not_supported() -> None:
 
     assert response.intent == "unknown"
     assert response.status == "not_supported"
+
+
+@pytest.mark.parametrize(
+    ("text", "target"),
+    [
+        ("connect spotify", "connect"),
+        ("disconnect spotify", "disconnect"),
+        ("spotify status", "status"),
+        ("play spotify", "play"),
+        ("pause spotify", "pause"),
+        ("next spotify song", "next"),
+        ("previous spotify song", "previous"),
+    ],
+)
+def test_spotify_commands_are_recognized(text: str, target: str) -> None:
+    response = route_command(text)
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "spotify",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "spotify", "target": target},
+        "message": "Spotify command was recognized, but DeskPilot will not run it yet.",
+    }
+
+
+def test_spotify_volume_command_is_recognized() -> None:
+    response = route_command("  SET   SPOTIFY   VOLUME   TO   50!  ")
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "spotify",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "spotify", "target": "volume", "query": "50"},
+        "message": (
+            "Spotify volume command was recognized, "
+            "but DeskPilot will not run it yet."
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "set spotify volume to",
+        "set spotify volume to loud",
+        "set spotify volume to -1",
+        "set spotify volume to 101",
+    ],
+)
+def test_invalid_spotify_volume_commands_are_rejected(text: str) -> None:
+    with pytest.raises(
+        CommandValidationError,
+        match="Spotify volume must be between 0 and 100.",
+    ):
+        route_command(text)
+
+
+def test_generic_media_commands_are_not_reinterpreted_as_spotify() -> None:
+    response = route_command("next song")
+
+    assert response.intent == "media_control"
+    assert response.action is not None
+    assert response.action.type == "media_key"
+    assert response.action.target == "next_track"
+
+
+def test_play_music_routes_to_default_music_action() -> None:
+    response = route_command("play music")
+
+    assert response.model_dump(exclude_none=True) == {
+        "intent": "default_music",
+        "status": "planned",
+        "requires_confirmation": False,
+        "action": {"type": "default_music", "target": "play"},
+        "message": (
+            "Default music playback was recognized, "
+            "but DeskPilot will not start it yet."
+        ),
+    }
 
 
 def test_unknown_workspace_like_command_is_not_supported() -> None:

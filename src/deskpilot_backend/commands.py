@@ -25,6 +25,9 @@ HELP_MESSAGE = (
     "open notes folder; remind me in one minute to stretch; "
     "remind me in 10 minutes to stretch; list reminders; "
     "what are my reminders; open deskpilot settings; "
+    "connect spotify; disconnect spotify; spotify status; play spotify; "
+    "pause spotify; next spotify song; previous spotify song; "
+    "set spotify volume to 50; "
     "cancel; never mind; help; what can you do."
 )
 
@@ -68,13 +71,14 @@ MEDIA_COMMANDS = {
     "turn volume down": "volume_down",
     "mute": "mute",
     "mute volume": "mute",
-    "play music": "play_pause",
     "pause music": "play_pause",
     "next song": "next_track",
     "next track": "next_track",
     "previous song": "previous_track",
     "previous track": "previous_track",
 }
+
+DEFAULT_MUSIC_COMMANDS = {"play music": "play"}
 
 WORKSPACE_COMMANDS = {
     "open downloads": "downloads",
@@ -100,6 +104,16 @@ NOTE_COMMANDS = {
 NOTE_COMMAND_PREFIXES = ("take a note", "note")
 DESKPILOT_SETTINGS_COMMANDS = {"open deskpilot settings"}
 REMINDER_COMMANDS = {"list reminders", "what are my reminders"}
+SPOTIFY_COMMANDS = {
+    "connect spotify": "connect",
+    "disconnect spotify": "disconnect",
+    "spotify status": "status",
+    "play spotify": "play",
+    "pause spotify": "pause",
+    "next spotify song": "next",
+    "previous spotify song": "previous",
+}
+SPOTIFY_VOLUME_PREFIX = "set spotify volume to"
 REMINDER_COMMAND_PATTERN = re.compile(
     r"^remind\s+me\s+in\s+(.+?)\s+minutes?\s+to(?:\s+|$)",
     re.IGNORECASE,
@@ -210,6 +224,21 @@ def route_command(
     if search_response is not None:
         return search_response
 
+    if normalized_text in DEFAULT_MUSIC_COMMANDS:
+        return CommandResponse(
+            intent="default_music",
+            status="planned",
+            requires_confirmation=False,
+            action=CommandAction(
+                type="default_music",
+                target=DEFAULT_MUSIC_COMMANDS[normalized_text],
+            ),
+            message=(
+                "Default music playback was recognized, "
+                "but DeskPilot will not start it yet."
+            ),
+        )
+
     if normalized_text in MEDIA_COMMANDS:
         return CommandResponse(
             intent="media_control",
@@ -282,6 +311,10 @@ def route_command(
             ),
         )
 
+    spotify_response = _route_spotify_command(normalized_text)
+    if spotify_response is not None:
+        return spotify_response
+
     if normalized_text in TIME_COMMANDS:
         return CommandResponse(
             intent="get_time",
@@ -320,6 +353,41 @@ def route_command(
         requires_confirmation=False,
         message="That command is not supported yet.",
     )
+
+
+def _route_spotify_command(normalized_text: str) -> CommandResponse | None:
+    if normalized_text in SPOTIFY_COMMANDS:
+        return CommandResponse(
+            intent="spotify",
+            status="planned",
+            requires_confirmation=False,
+            action=CommandAction(type="spotify", target=SPOTIFY_COMMANDS[normalized_text]),
+            message="Spotify command was recognized, but DeskPilot will not run it yet.",
+        )
+
+    prefix_with_space = f"{SPOTIFY_VOLUME_PREFIX} "
+    if normalized_text == SPOTIFY_VOLUME_PREFIX:
+        raise CommandValidationError("Spotify volume must be between 0 and 100.")
+    if normalized_text.startswith(prefix_with_space):
+        raw_volume = normalized_text.removeprefix(prefix_with_space)
+        if not raw_volume.isdecimal():
+            raise CommandValidationError("Spotify volume must be between 0 and 100.")
+        volume = int(raw_volume)
+        if volume < 0 or volume > 100:
+            raise CommandValidationError("Spotify volume must be between 0 and 100.")
+        return CommandResponse(
+            intent="spotify",
+            status="planned",
+            requires_confirmation=False,
+            action=CommandAction(
+                type="spotify",
+                target="volume",
+                query=str(volume),
+            ),
+            message="Spotify volume command was recognized, but DeskPilot will not run it yet.",
+        )
+
+    return None
 
 
 def _route_reminder_command(text: str) -> CommandResponse | None:

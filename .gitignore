@@ -20,6 +20,7 @@ htmlcov/
 DeskPilot/
 settings.json
 reminders.json
+spotify.bin
 *.wav
 *.mp3
 *.m4a

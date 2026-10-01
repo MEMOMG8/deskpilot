@@ -41,6 +41,7 @@ from deskpilot_backend.microphone import (
     record_microphone_wav,
 )
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
+from deskpilot_backend.spotify import SpotifyService
 from deskpilot_backend.transcription import (
     EmptyAudioError,
     TranscriptionServiceError,
@@ -54,6 +55,7 @@ transcription_service = WhisperTranscriptionService()
 command_interpreter = OpenAICommandInterpreter()
 clarification_store = ClarificationStore()
 reminder_service = ReminderService()
+spotify_service = SpotifyService()
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -77,6 +79,10 @@ def get_note_store() -> NoteStore | None:
 
 def get_reminder_service() -> ReminderService:
     return reminder_service
+
+
+def get_spotify_service() -> SpotifyService:
+    return spotify_service
 
 
 def get_settings_store() -> SettingsStore:
@@ -134,6 +140,7 @@ def execute_planned_action(
     note_store: NoteStore | None = Depends(get_note_store),
     reminders: ReminderService = Depends(get_reminder_service),
     settings_store: SettingsStore = Depends(get_settings_store),
+    spotify: SpotifyService = Depends(get_spotify_service),
 ) -> ActionExecutionResponse:
     try:
         return execute_action(
@@ -144,6 +151,7 @@ def execute_planned_action(
             note_store=note_store,
             reminder_service=reminders,
             settings_store=settings_store,
+            spotify_service=spotify,
         )
     except UnsupportedActionError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -162,6 +170,7 @@ def create_assistant_command(
     note_store: NoteStore | None = Depends(get_note_store),
     reminders: ReminderService = Depends(get_reminder_service),
     settings_store: SettingsStore = Depends(get_settings_store),
+    spotify: SpotifyService = Depends(get_spotify_service),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
     clarifications: ClarificationStore = Depends(get_clarification_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
@@ -177,6 +186,7 @@ def create_assistant_command(
             note_store=note_store,
             reminder_service=reminders,
             settings_store=settings_store,
+            spotify_service=spotify,
             speech_engine_factory=speech_engine_factory,
             command_interpreter=interpreter,
             clarification_store=clarifications,
@@ -234,6 +244,7 @@ async def create_voice_command(
     note_store: NoteStore | None = Depends(get_note_store),
     reminders: ReminderService = Depends(get_reminder_service),
     settings_store: SettingsStore = Depends(get_settings_store),
+    spotify: SpotifyService = Depends(get_spotify_service),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
     clarifications: ClarificationStore = Depends(get_clarification_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
@@ -255,6 +266,7 @@ async def create_voice_command(
             note_store=note_store,
             reminder_service=reminders,
             settings_store=settings_store,
+            spotify_service=spotify,
             speech_engine_factory=speech_engine_factory,
             command_interpreter=interpreter,
             clarification_store=clarifications,
@@ -286,6 +298,7 @@ def create_microphone_command(
     note_store: NoteStore | None = Depends(get_note_store),
     reminders: ReminderService = Depends(get_reminder_service),
     settings_store: SettingsStore = Depends(get_settings_store),
+    spotify: SpotifyService = Depends(get_spotify_service),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
     clarifications: ClarificationStore = Depends(get_clarification_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
@@ -306,6 +319,7 @@ def create_microphone_command(
             note_store=note_store,
             reminder_service=reminders,
             settings_store=settings_store,
+            spotify_service=spotify,
             speech_engine_factory=speech_engine_factory,
             command_interpreter=interpreter,
             clarification_store=clarifications,

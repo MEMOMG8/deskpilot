@@ -21,11 +21,13 @@ from deskpilot_backend.main import (
     get_reminder_service,
     get_settings_store,
     get_speech_engine_factory,
+    get_spotify_service,
     get_system_status_reader,
 )
 from deskpilot_backend.notes import NoteStore
 from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.settings import SettingsStore
+from deskpilot_backend.spotify import SpotifyDevice
 
 
 class RecordingLauncher:
@@ -54,6 +56,63 @@ class RecordingSystemStatusReader:
     def __call__(self, target: str) -> str:
         self.targets.append(target)
         return self.messages[target]
+
+
+class FakeSpotifyService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object | None]] = []
+        self.device_results = [
+            [],
+            [
+                SpotifyDevice(
+                    id="desktop-after-launch",
+                    name="Desktop Spotify",
+                    type="Computer",
+                    is_active=False,
+                    is_restricted=False,
+                )
+            ],
+        ]
+
+    def connect(self) -> str:
+        self.calls.append(("connect", None))
+        return "Spotify connected."
+
+    def disconnect(self) -> str:
+        self.calls.append(("disconnect", None))
+        return "Spotify disconnected."
+
+    def status(self) -> str:
+        self.calls.append(("status", None))
+        return "Spotify Paused: Test Song by Test Artist."
+
+    def play(self) -> str:
+        self.calls.append(("play", None))
+        return "Playing Spotify."
+
+    def available_devices(self) -> list[SpotifyDevice]:
+        self.calls.append(("devices", None))
+        return self.device_results.pop(0) if self.device_results else []
+
+    def transfer_playback(self, device_id: str, *, play: bool = True) -> str:
+        self.calls.append(("transfer", (device_id, play)))
+        return "Spotify playback transferred."
+
+    def pause(self) -> str:
+        self.calls.append(("pause", None))
+        return "Pausing Spotify."
+
+    def next_track(self) -> str:
+        self.calls.append(("next", None))
+        return "Skipping to the next Spotify song."
+
+    def previous_track(self) -> str:
+        self.calls.append(("previous", None))
+        return "Going to the previous Spotify song."
+
+    def set_volume(self, volume_percent: int) -> str:
+        self.calls.append(("volume", volume_percent))
+        return f"Spotify volume set to {volume_percent}%."
 
 
 class FakeTimer:
@@ -111,6 +170,7 @@ def mocked_dependencies(
     note_store: NoteStore | None = None,
     reminder_service: ReminderService | None = None,
     settings_store: SettingsStore | None = None,
+    spotify_service: FakeSpotifyService | None = None,
     speech_engine_factory: object | None = None,
 ) -> Iterator[None]:
     if launcher is not None:
@@ -132,6 +192,9 @@ def mocked_dependencies(
 
     if settings_store is not None:
         app.dependency_overrides[get_settings_store] = lambda: settings_store
+
+    if spotify_service is not None:
+        app.dependency_overrides[get_spotify_service] = lambda: spotify_service
 
     if speech_engine_factory is not None:
         app.dependency_overrides[get_speech_engine_factory] = (
@@ -315,7 +378,6 @@ def test_assistant_information_commands_do_not_call_executor(
     [
         ("volume up", "volume_up", VK_VOLUME_UP, "Turning volume up."),
         ("turn volume up", "volume_up", VK_VOLUME_UP, "Turning volume up."),
-        ("play music", "play_pause", VK_MEDIA_PLAY_PAUSE, "Toggling media playback."),
         ("pause music", "play_pause", VK_MEDIA_PLAY_PAUSE, "Toggling media playback."),
     ],
 )
@@ -346,6 +408,124 @@ def test_assistant_media_commands_route_and_send_fixed_key_events(
     }
     assert launcher.commands == []
     assert key_event_sender.events == [(virtual_key, 0), (virtual_key, KEYEVENTF_KEYUP)]
+
+
+def test_assistant_play_music_uses_default_spotify_music_flow() -> None:
+    launcher = RecordingLauncher()
+    service = FakeSpotifyService()
+    client = TestClient(app)
+
+    with mocked_dependencies(launcher=launcher, spotify_service=service):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "play music"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "default_music",
+        "status": "executed",
+        "requires_confirmation": False,
+        "message": "Opening Spotify and playing music.",
+        "speech_result": "not_requested",
+        "action": {"type": "default_music", "target": "play"},
+    }
+    assert launcher.commands == [["explorer.exe", "spotify:"]]
+    assert service.calls == [
+        ("devices", None),
+        ("devices", None),
+        ("transfer", ("desktop-after-launch", True)),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("text", "target", "expected_call", "expected_message"),
+    [
+        ("connect spotify", "connect", ("connect", None), "Spotify connected."),
+        (
+            "disconnect spotify",
+            "disconnect",
+            ("disconnect", None),
+            "Spotify disconnected.",
+        ),
+        (
+            "spotify status",
+            "status",
+            ("status", None),
+            "Spotify Paused: Test Song by Test Artist.",
+        ),
+        ("play spotify", "play", ("play", None), "Playing Spotify."),
+        ("pause spotify", "pause", ("pause", None), "Pausing Spotify."),
+        (
+            "next spotify song",
+            "next",
+            ("next", None),
+            "Skipping to the next Spotify song.",
+        ),
+        (
+            "previous spotify song",
+            "previous",
+            ("previous", None),
+            "Going to the previous Spotify song.",
+        ),
+        (
+            "set spotify volume to 45",
+            "volume",
+            ("volume", 45),
+            "Spotify volume set to 45%.",
+        ),
+    ],
+)
+def test_assistant_spotify_commands_route_to_allowlisted_service(
+    text: str,
+    target: str,
+    expected_call: tuple[str, int | None],
+    expected_message: str,
+) -> None:
+    service = FakeSpotifyService()
+    client = TestClient(app)
+
+    with mocked_dependencies(spotify_service=service):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": text},
+        )
+
+    expected_action = {"type": "spotify", "target": target}
+    if target == "volume":
+        expected_action["query"] = "45"
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent": "spotify",
+        "status": "executed",
+        "requires_confirmation": False,
+        "message": expected_message,
+        "speech_result": "not_requested",
+        "action": expected_action,
+    }
+    assert service.calls == [expected_call]
+
+
+def test_assistant_spotify_with_speak_narrates_response() -> None:
+    service = FakeSpotifyService()
+    engine = FakeSpeechEngine()
+    client = TestClient(app)
+
+    with mocked_dependencies(
+        spotify_service=service,
+        speech_engine_factory=lambda: engine,
+    ):
+        response = client.post(
+            "/api/v1/assistant/commands",
+            json={"text": "pause spotify", "speak": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Pausing Spotify."
+    assert response.json()["speech_result"] == "completed"
+    assert service.calls == [("pause", None)]
+    assert engine.spoken_text == ["Pausing Spotify."]
 
 
 @pytest.mark.parametrize(
