@@ -26,6 +26,7 @@ from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.settings import DeskPilotSettings, SettingsStore
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
 from deskpilot_backend.spotify import SpotifyService
+from deskpilot_backend.windows_media import MediaController
 from deskpilot_backend.transcription import (
     EmptyAudioError,
     ProviderTranscriptionService,
@@ -78,6 +79,7 @@ class NativeVoiceCommandService:
     reminder_service: ReminderService | None = None
     settings_store: SettingsStore | None = None
     spotify_service: SpotifyService | None = None
+    media_controller: MediaController | None = None
     speech_engine_factory: SpeechEngineFactory | None = None
     cue_player: CuePlayer = play_recording_start_cue
     on_processing_started: ProgressCallback | None = None
@@ -87,6 +89,7 @@ class NativeVoiceCommandService:
     voice_command_interpreter_provider: InterpreterProvider = "auto"
     transcription_provider_factory: TranscriptionProviderFactory | None = None
     custom_aliases: Mapping[str, str] | None = None
+    microphone_device: dict[str, str] | None = None
 
     def run(self) -> VoiceCommandResponse:
         try:
@@ -95,7 +98,12 @@ class NativeVoiceCommandService:
             except Exception as error:
                 raise NativeVoiceCommandError("Recording cue is unavailable.") from error
 
-            audio_bytes = self.recorder(self.capture_duration_seconds)
+            if self.recorder is record_adaptive_microphone_wav:
+                audio_bytes = self.recorder(
+                    self.capture_duration_seconds, device=self.microphone_device
+                )
+            else:
+                audio_bytes = self.recorder(self.capture_duration_seconds)
             if self.on_processing_started is not None:
                 self.on_processing_started()
 
@@ -112,6 +120,7 @@ class NativeVoiceCommandService:
                 reminder_service=self.reminder_service,
                 settings_store=self.settings_store,
                 spotify_service=self.spotify_service,
+                media_controller=self.media_controller,
                 custom_aliases=self.custom_aliases,
                 command_interpreter=self._get_command_interpreter(),
                 command_interpreter_provider=self.voice_command_interpreter_provider,
@@ -186,6 +195,7 @@ def apply_native_voice_preferences(
         else disabled_cue_player
     )
     service.custom_aliases = settings.custom_aliases
+    service.microphone_device = settings.microphone_device
     service.voice_transcription_provider = settings.voice_transcription_provider
     service.voice_command_interpreter_provider = (
         settings.voice_command_interpreter_provider
@@ -215,7 +225,8 @@ def _narrate_native_response(
     speech_engine_factory: SpeechEngineFactory | None,
 ) -> None:
     if (
-        response.assistant.status == "not_supported"
+        response.assistant.intent == "unknown"
+        and response.assistant.status == "not_supported"
         and not response.assistant.requires_confirmation
     ):
         response.assistant.message = NATIVE_UNKNOWN_COMMAND_MESSAGE

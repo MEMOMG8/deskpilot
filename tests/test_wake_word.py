@@ -97,6 +97,20 @@ def test_wake_word_service_ignores_scores_below_threshold() -> None:
     assert detections == []
 
 
+def test_reused_wake_model_is_reset_on_each_listening_start():
+    model = FakeWakeWordModel(score=0.0)
+    resets = []
+    model.reset = lambda: resets.append(True)
+    service = WakeWordService(
+        on_detected=lambda: None, model_factory=lambda: model,
+        stream_factory=lambda callback: FakeAudioStream(),
+    )
+    for _ in range(2):
+        service.start()
+        service.stop()
+    assert resets == [True, True]
+
+
 def test_wake_word_startup_failure_reports_root_cause_and_logs_traceback(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -123,8 +137,9 @@ def test_wake_word_startup_failure_reports_root_cause_and_logs_traceback(
     assert service.is_running is False
 
 
-def test_openwakeword_model_download_uses_installed_model_names_api(
+def test_openwakeword_model_uses_writable_user_cache_paths(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     calls: dict[str, object] = {}
 
@@ -134,32 +149,28 @@ def test_openwakeword_model_download_uses_installed_model_names_api(
             *,
             wakeword_models: list[str],
             inference_framework: str,
+            **kwargs,
         ) -> None:
             calls["wakeword_models"] = wakeword_models
             calls["inference_framework"] = inference_framework
+            calls.update(kwargs)
 
         def predict(self, frame: object) -> dict[str, float]:
             return {}
-
-    def download_models(*, model_names: list[str]) -> None:
-        calls["model_names"] = model_names
 
     monkeypatch.setitem(
         sys.modules,
         "openwakeword.model",
         types.SimpleNamespace(Model=FakeOpenWakeWordModel),
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "openwakeword.utils",
-        types.SimpleNamespace(download_models=download_models),
-    )
+    monkeypatch.setattr("deskpilot_backend.model_cache.ensure_wake_models", lambda: tmp_path)
 
     model = create_openwakeword_model()
 
     assert isinstance(model, FakeOpenWakeWordModel)
     assert calls == {
-        "model_names": [WAKE_WORD_MODEL],
-        "wakeword_models": [WAKE_WORD_MODEL],
+        "wakeword_models": [str(tmp_path / "hey_jarvis_v0.1.onnx")],
+        "melspec_model_path": str(tmp_path / "melspectrogram.onnx"),
+        "embedding_model_path": str(tmp_path / "embedding_model.onnx"),
         "inference_framework": "onnx",
     }

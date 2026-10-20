@@ -153,6 +153,24 @@ def test_custom_alias_rejects_builtin_collision_after_normalization() -> None:
     assert len(settings.warnings) == 2
 
 
+def test_aliases_cannot_replace_spotify_or_other_builtins() -> None:
+    from deskpilot_backend.commands import (
+        APPLICATION_COMMANDS, DEFAULT_MUSIC_COMMANDS, MEDIA_COMMANDS,
+        NOTE_COMMANDS, REMINDER_COMMANDS, SPOTIFY_COMMANDS,
+    )
+    from deskpilot_backend.settings import parse_custom_aliases
+
+    phrases = (
+        set(APPLICATION_COMMANDS) | set(DEFAULT_MUSIC_COMMANDS) | set(MEDIA_COMMANDS)
+        | set(NOTE_COMMANDS) | set(REMINDER_COMMANDS) | set(SPOTIFY_COMMANDS)
+    )
+    for phrase in phrases:
+        alias = "  " + phrase.upper().replace(" ", "   ") + "!  "
+        assert parse_custom_aliases({alias: "open calculator"}) == {}, phrase
+    assert parse_custom_aliases({"connect spotify": "open calculator"}) == {}
+    assert parse_custom_aliases({"pause spotify": "open notepad"}) == {}
+
+
 def test_custom_alias_rejects_alias_collision_after_normalization() -> None:
     settings = parse_settings(
         {

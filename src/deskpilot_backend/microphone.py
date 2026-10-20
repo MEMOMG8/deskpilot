@@ -6,6 +6,7 @@ from array import array
 from collections.abc import Callable
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import partial
 from sys import byteorder
 
 SAMPLE_RATE = 16000
@@ -94,10 +95,14 @@ def record_microphone_wav(duration_seconds: int) -> bytes:
         raise MicrophoneError("Local microphone recording is unavailable.") from error
 
 
-def record_adaptive_microphone_wav(duration_seconds: int) -> bytes:
+def record_adaptive_microphone_wav(
+    duration_seconds: int, *, device: dict[str, str] | None = None
+) -> bytes:
     config = AdaptiveRecordingConfig(max_duration_seconds=duration_seconds)
     try:
-        return capture_adaptive_speech_wav(config)
+        return capture_adaptive_speech_wav(
+            config, frame_source=partial(sounddevice_frame_source, device=device)
+        )
     except NoSpeechDetectedError:
         raise
     except Exception as error:
@@ -258,10 +263,14 @@ def capture_adaptive_speech_pcm(
 def sounddevice_frame_source(
     frame_samples: int,
     max_frames: int,
+    *,
+    device: dict[str, str] | None = None,
 ) -> Iterable[bytes]:
     import sounddevice
+    from deskpilot_backend.audio_devices import resolve_input_device
 
     with sounddevice.RawInputStream(
+        device=resolve_input_device(device, sounddevice),
         samplerate=SAMPLE_RATE,
         channels=CHANNELS,
         dtype=DTYPE,

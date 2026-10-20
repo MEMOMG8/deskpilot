@@ -30,15 +30,16 @@ Optional custom alias setup:
 
 Optional Spotify setup:
 
-1. Create a Spotify Developer app with redirect URI `http://127.0.0.1:8765/callback`.
-2. Set `$env:SPOTIFY_CLIENT_ID = "your_spotify_client_id"` before starting DeskPilot.
-3. Say or type `connect spotify` once and approve in the browser.
-4. Keep Spotify installed. For automatic playback control, connect once and keep an active Spotify device available.
+1. Install Spotify Desktop and sign in through Spotify.
+2. Start a song once, then pause it so Windows has a media session for the demo.
+3. Keep other media players closed to make the current Windows session unambiguous.
+
+No Spotify Developer app, Client ID, OAuth, or `connect spotify` command is needed.
 
 ## 90-Second Walkthrough
 
 1. Start with the tray app visible.
-   - "DeskPilot is a local-first Windows voice assistant. It uses local wake-word detection, local transcription, deterministic command routing, and explicit allowlists."
+   - "DeskPilot is a local-first Windows voice assistant. It uses local wake-word detection, configurable transcription, deterministic command routing, and explicit allowlists."
 
 2. Enable wake-word listening from the tray.
    - Choose `Start wake word listening`.
@@ -52,7 +53,7 @@ Optional Spotify setup:
 4. Show a media command.
    - Say: "Hey Jarvis."
    - Say: "mute."
-   - Expected: DeskPilot toggles mute through a fixed Windows media key. Mention that media commands affect the active Windows media session.
+   - Expected: DeskPilot toggles system mute through a fixed Windows media key. Say `mute` again to restore sound before continuing.
 
 5. Save a local note.
    - Say: "Hey Jarvis."
@@ -69,10 +70,12 @@ Optional Spotify setup:
    - Say: "open my projects."
    - Expected: DeskPilot opens GitHub because the alias maps to the existing fixed command `open github`.
 
-8. Optional: show Spotify active-device control.
+8. Optional: show local Spotify Desktop control.
    - Say: "Hey Jarvis."
    - Say: "play music."
-   - Expected: DeskPilot opens Spotify. If Spotify is connected and an active device becomes available, DeskPilot resumes playback.
+   - Expected: DeskPilot opens Spotify if no Spotify session is registered, then requests play on the current Windows media session.
+   - Follow with `pause music`: playback pauses explicitly. Repeating pause leaves it paused.
+   - If no session exists, expect a recoverable message asking you to start a song once.
 
 9. Show safety behavior.
    - Say: "Hey Jarvis."

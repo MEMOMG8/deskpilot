@@ -18,6 +18,7 @@ from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.settings import SettingsStore
 from deskpilot_backend.speech import SpeechEngineFactory
 from deskpilot_backend.spotify import SpotifyService
+from deskpilot_backend.windows_media import MediaController
 from deskpilot_backend.transcription import TranscriptionService
 
 
@@ -35,6 +36,7 @@ def handle_voice_command(
     reminder_service: ReminderService | None = None,
     settings_store: SettingsStore | None = None,
     spotify_service: SpotifyService | None = None,
+    media_controller: MediaController | None = None,
     speech_engine_factory: SpeechEngineFactory | None = None,
     custom_aliases: Mapping[str, str] | None = None,
     command_interpreter: CommandInterpreter | None = None,
@@ -68,6 +70,7 @@ def handle_voice_command(
         reminder_service=reminder_service,
         settings_store=settings_store,
         spotify_service=spotify_service,
+        media_controller=media_controller,
         speech_engine_factory=speech_engine_factory,
         custom_aliases=custom_aliases,
         command_interpreter=command_interpreter,

@@ -11,7 +11,7 @@ TERMINAL_PUNCTUATION = ".,!?"
 MAX_SEARCH_QUERY_LENGTH = 120
 HELP_MESSAGE = (
     "Supported commands: open calculator; open notepad; open file explorer; "
-    "open explorer; open settings; open browser; open google; open youtube; "
+    "open explorer; open settings; open browser; open spotify; open google; open youtube; "
     "open github; search web for example query; search google for example query; "
     "search youtube for example query; search github for example query; "
     "what time is it; what's the time; what is the date; what's today's date; "
@@ -49,6 +49,7 @@ APPLICATION_COMMANDS = {
     "open explorer": ApplicationCommand("file_explorer", "File Explorer"),
     "open settings": ApplicationCommand("settings", "Windows Settings"),
     "open browser": ApplicationCommand("browser", "the default browser"),
+    "open spotify": ApplicationCommand("spotify", "Spotify"),
 }
 
 FIXED_SITE_COMMANDS = {
@@ -71,7 +72,7 @@ MEDIA_COMMANDS = {
     "turn volume down": "volume_down",
     "mute": "mute",
     "mute volume": "mute",
-    "pause music": "play_pause",
+    "pause music": "pause",
     "next song": "next_track",
     "next track": "next_track",
     "previous song": "previous_track",

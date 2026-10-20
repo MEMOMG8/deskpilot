@@ -1,81 +1,66 @@
+param(
+    [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_-]{0,70}$')]
+    [string]$BuildId = ("dp032-test-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+)
+
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$Python = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+$OutputDir = Join-Path $RepoRoot "dist\$BuildId"
+$WorkDir = Join-Path $RepoRoot "build\$BuildId"
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot = Resolve-Path (Join-Path $ScriptDir "..")
-$VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
-$Python = if (Test-Path $VenvPython) { $VenvPython } else { "python" }
-$DistDir = Join-Path $RepoRoot "dist"
-$BuildDir = Join-Path $RepoRoot "build"
-$EntryDir = Join-Path $BuildDir "pyinstaller-entry"
-$EntryScript = Join-Path $EntryDir "deskpilot_desktop_entry.py"
-$ExePath = Join-Path $DistDir "DeskPilot\DeskPilot.exe"
+if (-not (Test-Path -LiteralPath $Python)) {
+    throw "Install project build dependencies in .venv first: python -m pip install -e `".[dev]`""
+}
+if ((Test-Path -LiteralPath $OutputDir) -or (Test-Path -LiteralPath $WorkDir)) {
+    throw "BuildId already exists. Choose a new BuildId; previous artifacts are never deleted."
+}
+New-Item -ItemType Directory -Path $OutputDir, $WorkDir | Out-Null
+$SavedBuildEnvironment = @{}
+$BuildEnvironmentNames = @(
+    "PATH", "PYTHONPATH", "PYTHONHOME", "QT_PLUGIN_PATH",
+    "QT_QPA_PLATFORM_PLUGIN_PATH", "QML2_IMPORT_PATH"
+)
+foreach ($EnvironmentName in $BuildEnvironmentNames) {
+    $SavedBuildEnvironment[$EnvironmentName] = [Environment]::GetEnvironmentVariable($EnvironmentName, "Process")
+}
 
 Push-Location $RepoRoot
 try {
-    & $Python -c "import PyInstaller" | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "PyInstaller is not installed. Run: python -m pip install -e `".[dev]`""
+    & $Python -m pip check
+    if ($LASTEXITCODE -ne 0) { throw "Project dependency check failed." }
+    $BuildLog = Join-Path $WorkDir "pyinstaller.log"
+    # Prevent DLLs from unrelated tools on the developer PATH entering the bundle.
+    foreach ($EnvironmentName in $BuildEnvironmentNames) {
+        [Environment]::SetEnvironmentVariable($EnvironmentName, $null, "Process")
     }
-
-    Remove-Item -LiteralPath (Join-Path $DistDir "DeskPilot") -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath (Join-Path $BuildDir "DeskPilot") -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $EntryDir -Recurse -Force -ErrorAction SilentlyContinue
-
-    New-Item -ItemType Directory -Force $EntryDir | Out-Null
-    Set-Content -LiteralPath $EntryScript -Encoding UTF8 -Value @"
-from deskpilot_backend.desktop import main
-
-raise SystemExit(main())
-"@
-
-    $PyInstallerArgs = @(
-        "-m", "PyInstaller",
-        "--noconfirm",
-        "--clean",
-        "--onedir",
-        "--noconsole",
-        "--name", "DeskPilot",
-        "--paths", (Join-Path $RepoRoot "src"),
-        "--distpath", $DistDir,
-        "--workpath", $BuildDir,
-        "--specpath", $BuildDir,
-        "--collect-all", "pyttsx3",
-        "--collect-all", "sounddevice",
-        "--collect-all", "openwakeword",
-        "--collect-all", "faster_whisper",
-        "--collect-all", "openai",
-        "--collect-all", "ctranslate2",
-        "--collect-all", "av",
-        "--collect-all", "onnxruntime",
-        "--copy-metadata", "openwakeword",
-        "--copy-metadata", "faster-whisper",
-        "--copy-metadata", "openai",
-        "--copy-metadata", "pyttsx3",
-        "--copy-metadata", "sounddevice",
-        "--hidden-import", "deskpilot_backend.desktop",
-        "--hidden-import", "PySide6.QtCore",
-        "--hidden-import", "PySide6.QtGui",
-        "--hidden-import", "PySide6.QtWidgets",
-        "--hidden-import", "pyttsx3.drivers",
-        "--hidden-import", "pyttsx3.drivers.sapi5",
-        "--hidden-import", "pythoncom",
-        "--hidden-import", "pywintypes",
-        "--hidden-import", "win32com.client",
-        $EntryScript
-    )
-
-    & $Python $PyInstallerArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "PyInstaller failed with exit code $LASTEXITCODE."
+    $env:PATH = (Join-Path $RepoRoot ".venv\Scripts") + ";" +
+        (Join-Path $env:SystemRoot "System32") + ";" + $env:SystemRoot
+    $ErrorActionPreference = "Continue"
+    & $Python -m PyInstaller --noconfirm --clean `
+        --distpath $OutputDir --workpath $WorkDir `
+        (Join-Path $RepoRoot "packaging\DeskPilot.spec") 2>&1 |
+        Tee-Object -FilePath $BuildLog
+    $BuildExitCode = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
+    foreach ($EnvironmentName in $BuildEnvironmentNames) {
+        [Environment]::SetEnvironmentVariable($EnvironmentName, $SavedBuildEnvironment[$EnvironmentName], "Process")
     }
-
-    if (-not (Test-Path $ExePath)) {
-        throw "Expected executable was not created: $ExePath"
+    if ($BuildExitCode -ne 0) { throw "PyInstaller failed. See $BuildLog" }
+    $PackageDir = Join-Path $OutputDir "DeskPilot"
+    if (-not (Test-Path -LiteralPath (Join-Path $PackageDir "DeskPilot.exe"))) {
+        throw "PyInstaller did not produce DeskPilot.exe."
     }
-
-    Write-Host "Built DeskPilot: $ExePath"
+    & $Python (Join-Path $RepoRoot "scripts\package-windows.py") `
+        --package $PackageDir --build-id $BuildId
+    if ($LASTEXITCODE -ne 0) { throw "Packaged checks or archive creation failed. See $OutputDir" }
+    Write-Host "Test distribution ready: $OutputDir"
 }
 finally {
+    $ErrorActionPreference = "Stop"
+    foreach ($EnvironmentName in $BuildEnvironmentNames) {
+        [Environment]::SetEnvironmentVariable($EnvironmentName, $SavedBuildEnvironment[$EnvironmentName], "Process")
+    }
     Pop-Location
 }

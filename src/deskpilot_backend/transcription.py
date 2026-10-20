@@ -78,6 +78,15 @@ class WhisperTranscriptionService:
         self.model_name = model_name
         self._model: object | None = None
 
+    def prepare(self) -> None:
+        """Download if needed and load the local model without recording audio."""
+        try:
+            self._get_model()
+        except Exception as error:
+            raise TranscriptionServiceError(
+                "The local speech model could not be prepared. Check your connection and free disk space, then retry."
+            ) from error
+
     def transcribe(
         self,
         audio_bytes: bytes,

@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,7 @@ from deskpilot_backend.commands import (
     HELP_COMMANDS,
     NOTE_COMMAND_PREFIXES,
     SEARCH_COMMAND_PREFIXES,
+    SPOTIFY_COMMANDS,
     SYSTEM_STATUS_COMMANDS,
     TIME_COMMANDS,
     WORKSPACE_COMMANDS,
@@ -57,6 +60,8 @@ class DeskPilotSettings:
     )
     default_music_app: str = DEFAULT_MUSIC_APP
     custom_aliases: dict[str, str] = field(default_factory=dict)
+    microphone_device: dict[str, str] | None = None
+    voice_setup_completed: bool = False
     warnings: tuple[str, ...] = ()
 
 
@@ -72,7 +77,7 @@ SAFE_ALIAS_TARGET_COMMANDS = (
     | {"open deskpilot settings"}
 )
 
-BUILT_IN_COMMANDS = SAFE_ALIAS_TARGET_COMMANDS | {
+BUILT_IN_COMMANDS = SAFE_ALIAS_TARGET_COMMANDS | set(SPOTIFY_COMMANDS) | {
     "volume up",
     "turn volume up",
     "volume down",
@@ -108,6 +113,8 @@ def default_settings_data() -> dict[str, Any]:
         "voice_command_interpreter_provider": DEFAULT_COMMAND_INTERPRETER_PROVIDER,
         "default_music_app": DEFAULT_MUSIC_APP,
         "custom_aliases": {},
+        "microphone_device": None,
+        "voice_setup_completed": False,
     }
 
 
@@ -134,6 +141,49 @@ class SettingsStore:
             self._write_default_settings()
 
         return self.settings_file
+
+    def save_voice_setup(
+        self, microphone_device: dict[str, str] | None, *, use_local: bool
+    ) -> DeskPilotSettings:
+        """Update only setup-owned fields, preserving existing user preferences."""
+        warnings: list[str] = []
+        selected = _parse_microphone_device(microphone_device, warnings)
+        if warnings:
+            raise SettingsStoreError("Choose a valid microphone before saving.")
+        temp_path: str | None = None
+        try:
+            self.settings_file.parent.mkdir(parents=True, exist_ok=True)
+            if self.settings_file.exists():
+                raw = json.loads(self.settings_file.read_text(encoding="utf-8"))
+                if not isinstance(raw, dict) or raw.get("version") != SETTINGS_VERSION:
+                    raise SettingsStoreError(
+                        "Existing settings have an unsupported format. Your file was not changed."
+                    )
+            else:
+                raw = default_settings_data()
+            raw.update(microphone_device=selected, voice_setup_completed=True)
+            if use_local:
+                raw.update(voice_transcription_provider="local", voice_command_interpreter_provider="local")
+            # Write beside the destination, then replace atomically. Invalid JSON
+            # is never silently replaced with defaults by this explicit save.
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=self.settings_file.parent,
+                prefix=".voice-setup-", suffix=".tmp", delete=False,
+            ) as target:
+                temp_path = target.name
+                target.write(json.dumps(raw, indent=2) + "\n")
+            os.replace(temp_path, self.settings_file)
+            return parse_settings(raw)
+        except (OSError, ValueError) as error:
+            raise SettingsStoreError(
+                "Voice setup could not be saved. Check settings.json and folder permissions; your existing file was not changed."
+            ) from error
+        finally:
+            if temp_path is not None and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
     def _write_default_settings(self) -> None:
         try:
@@ -198,6 +248,13 @@ def parse_settings(raw_settings: object) -> DeskPilotSettings:
         raw_settings.get("custom_aliases"),
         warnings=warnings,
     )
+    microphone_device = _parse_microphone_device(raw_settings.get("microphone_device"), warnings)
+    voice_setup_completed = _parse_bool_setting(
+        raw_settings.get("voice_setup_completed", False),
+        default=False,
+        setting_name="voice_setup_completed",
+        warnings=warnings,
+    )
 
     return DeskPilotSettings(
         command_capture_duration_seconds=command_capture_duration_seconds,
@@ -207,8 +264,23 @@ def parse_settings(raw_settings: object) -> DeskPilotSettings:
         voice_command_interpreter_provider=voice_command_interpreter_provider,
         default_music_app=default_music_app,
         custom_aliases=custom_aliases,
+        microphone_device=microphone_device,
+        voice_setup_completed=voice_setup_completed,
         warnings=tuple(warnings),
     )
+
+
+def _parse_microphone_device(raw: object, warnings: list[str]) -> dict[str, str] | None:
+    if raw is None:
+        return None
+    if (
+        isinstance(raw, dict)
+        and set(raw) == {"name", "hostapi"}
+        and all(isinstance(value, str) and 0 < len(value.strip()) <= 512 for value in raw.values())
+    ):
+        return dict(raw)
+    warnings.append("Invalid microphone selection; using the default input device.")
+    return None
 
 
 def parse_custom_aliases(

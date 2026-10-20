@@ -15,7 +15,9 @@ from deskpilot_backend.desktop_voice import (
 )
 from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.settings import DeskPilotSettings, SettingsStore, SettingsStoreError
-from deskpilot_backend.wake_word import WakeWordError, WakeWordService
+from deskpilot_backend.transcription import ProviderTranscriptionService
+from deskpilot_backend.voice_setup import VoiceModelResources, check_cancelled
+from deskpilot_backend.wake_word import WakeWordError, WakeWordService, create_sounddevice_stream
 
 LOGGER = logging.getLogger(__name__)
 
@@ -71,6 +73,7 @@ def main() -> int:
         QSystemTrayIcon,
         QWidget,
     )
+    from deskpilot_backend.voice_setup_ui import VoiceSetupDialog
 
     class ListeningOverlay(QWidget):
         def __init__(self) -> None:
@@ -138,6 +141,8 @@ def main() -> int:
         native_command_failed = Signal(str)
         native_recoverable_error = Signal(str)
         reminder_due = Signal(str)
+        wake_started = Signal(str)
+        wake_preparation = Signal(str)
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
@@ -159,11 +164,19 @@ def main() -> int:
         hide_border=overlay.hide,
         schedule_hide=QTimer.singleShot,
     )
+    model_resources = VoiceModelResources()
     wake_word_service = WakeWordService(
         on_detected=signals.wake_word_detected.emit,
         on_error=signals.wake_word_error.emit,
+        model_factory=model_resources.wake_model,
+        stream_factory=lambda callback: create_sounddevice_stream(
+            callback, device=deskpilot_settings.microphone_device
+        ),
     )
     wake_word_lock = threading.Lock()
+    wake_starting = False
+    wake_start_cancel = threading.Event()
+    setup_dialog = None
     icon = app.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
 
     tray = QSystemTrayIcon(icon)
@@ -173,19 +186,26 @@ def main() -> int:
     hide_action = QAction("Hide border")
     start_wake_action = QAction("Start wake word listening")
     stop_wake_action = QAction("Stop wake word listening")
+    setup_action = QAction("Voice setup…")
     quit_action = QAction("Quit DeskPilot")
 
     def update_tray_state() -> None:
         wake_state = "on" if native_command_state.wake_word_enabled else "off"
         if native_command_state.command_in_progress:
             wake_state = f"{wake_state}, command in progress"
+        if wake_starting:
+            wake_state = "preparing voice models"
 
         tray.setToolTip(f"DeskPilot - wake word {wake_state}")
+        setup_active = setup_dialog is not None and (setup_dialog.isVisible() or setup_dialog.busy)
         start_wake_action.setEnabled(
             not native_command_state.wake_word_enabled
             and not native_command_state.command_in_progress
+            and not wake_starting
+            and not setup_active
         )
         stop_wake_action.setEnabled(native_command_state.wake_word_enabled)
+        setup_action.setEnabled(not native_command_state.command_in_progress and not wake_starting)
 
     def start_wake_word_service() -> None:
         with wake_word_lock:
@@ -203,30 +223,59 @@ def main() -> int:
         overlay.hide()
 
     def start_wake_word() -> None:
+        nonlocal wake_starting
         if native_command_state.command_in_progress:
             tray.showMessage("DeskPilot", "Finish the current command first.")
             return
-
-        native_command_state.enable_wake_word()
-        try:
-            start_wake_word_service()
-        except WakeWordError as error:
-            LOGGER.exception("Wake-word listening startup failed.")
-            native_command_state.disable_wake_word()
-            tray.showMessage("DeskPilot", str(error))
-            update_tray_state()
+        if wake_starting or native_command_state.wake_word_enabled:
             return
-
+        if setup_dialog is not None and (setup_dialog.isVisible() or setup_dialog.busy):
+            return
+        if not deskpilot_settings.voice_setup_completed:
+            show_voice_setup()
+            return
+        wake_starting = True
+        wake_start_cancel.clear()
+        native_command_state.enable_wake_word()
         update_tray_state()
-        tray.showMessage("DeskPilot", "Wake-word listening is enabled.")
+
+        def prepare_and_start():
+            message = ""
+            try:
+                if not model_resources.ready:
+                    model_resources.prepare(signals.wake_preparation.emit, wake_start_cancel)
+                check_cancelled(wake_start_cancel)
+                start_wake_word_service()
+            except Exception as error:
+                message = str(error)
+            signals.wake_started.emit(message)
+
+        threading.Thread(
+            target=prepare_and_start, name="DeskPilotVoiceStartup", daemon=True
+        ).start()
+
+    def on_wake_started(message: str) -> None:
+        nonlocal wake_starting
+        wake_starting = False
+        if message or wake_start_cancel.is_set() or not native_command_state.wake_word_enabled:
+            stop_wake_word_service()
+            native_command_state.disable_wake_word()
+            tray.showMessage("DeskPilot", message or "Wake-word listening is stopped.")
+        else:
+            tray.showMessage("DeskPilot", "Wake-word listening is enabled.")
+        update_tray_state()
 
     def stop_wake_word() -> None:
         native_command_state.disable_wake_word()
-        stop_wake_word_service()
+        wake_start_cancel.set()
+        if not wake_starting:
+            stop_wake_word_service()
         update_tray_state()
         tray.showMessage("DeskPilot", "Wake-word listening is stopped.")
 
     def on_wake_word_detected() -> None:
+        if wake_starting:
+            return
         if not native_command_state.begin_command_after_wake_word():
             return
 
@@ -300,7 +349,11 @@ def main() -> int:
 
     def quit_deskpilot() -> None:
         native_command_state.disable_wake_word()
-        stop_wake_word_service()
+        wake_start_cancel.set()
+        if setup_dialog is not None:
+            setup_dialog.reject()
+        if not wake_starting:
+            stop_wake_word_service()
         reminder_service.stop()
         overlay.hide()
         tray.hide()
@@ -313,16 +366,46 @@ def main() -> int:
         settings_store=settings_store,
         on_processing_started=signals.native_command_processing.emit,
         on_recoverable_error=signals.native_recoverable_error.emit,
+        transcription_provider_factory=lambda provider, on_fallback: ProviderTranscriptionService(
+            provider=provider, on_fallback=on_fallback, local_service=model_resources.local_service
+        ),
     )
     start_wake_on_startup = apply_native_voice_preferences(
         native_voice_service,
         deskpilot_settings,
     )
 
+    def on_setup_saved(settings: DeskPilotSettings) -> None:
+        nonlocal deskpilot_settings
+        deskpilot_settings = settings
+        apply_native_voice_preferences(native_voice_service, settings)
+        tray.showMessage(
+            "DeskPilot", "Voice setup saved. Choose Start wake word listening, then say Hey Jarvis."
+        )
+
+    def show_voice_setup() -> None:
+        nonlocal setup_dialog
+        if native_command_state.command_in_progress or wake_starting:
+            tray.showMessage("DeskPilot", "Finish the current voice operation before opening setup.")
+            return
+        if setup_dialog is not None and setup_dialog.busy:
+            tray.showMessage("DeskPilot", "Setup is still finishing in the background. Please wait.")
+            return
+        native_command_state.disable_wake_word()
+        stop_wake_word_service()
+        if setup_dialog is None:
+            setup_dialog = VoiceSetupDialog(settings_store, deskpilot_settings, model_resources)
+            setup_dialog.saved.connect(on_setup_saved)
+            setup_dialog.busy_changed.connect(update_tray_state)
+            setup_dialog.finished.connect(update_tray_state)
+        setup_dialog.begin()
+        update_tray_state()
+
     show_action.triggered.connect(show_border)
     hide_action.triggered.connect(hide_border)
     start_wake_action.triggered.connect(start_wake_word)
     stop_wake_action.triggered.connect(stop_wake_word)
+    setup_action.triggered.connect(show_voice_setup)
     quit_action.triggered.connect(quit_deskpilot)
     signals.wake_word_detected.connect(on_wake_word_detected)
     signals.wake_word_error.connect(on_wake_word_error)
@@ -330,12 +413,15 @@ def main() -> int:
     signals.native_command_completed.connect(on_native_command_completed)
     signals.native_command_failed.connect(on_native_command_failed)
     signals.native_recoverable_error.connect(on_native_recoverable_error)
+    signals.wake_started.connect(on_wake_started)
+    signals.wake_preparation.connect(lambda message: tray.showMessage("DeskPilot voice models", message))
 
     menu.addAction(show_action)
     menu.addAction(hide_action)
     menu.addSeparator()
     menu.addAction(start_wake_action)
     menu.addAction(stop_wake_action)
+    menu.addAction(setup_action)
     menu.addSeparator()
     menu.addAction(quit_action)
 
@@ -347,8 +433,10 @@ def main() -> int:
         LOGGER.warning("DeskPilot settings warning: %s", warning)
         tray.showMessage("DeskPilot settings", warning)
 
-    if start_wake_on_startup:
-        start_wake_word()
+    if not deskpilot_settings.voice_setup_completed:
+        QTimer.singleShot(0, show_voice_setup)
+    elif start_wake_on_startup:
+        QTimer.singleShot(0, start_wake_word)
 
     return app.exec()
 

@@ -5,13 +5,15 @@ DeskPilot is a local-first Windows voice assistant that demonstrates safe native
 ## Features
 
 - Native Windows tray shell with local wake-word activation: "Hey Jarvis"
+- First-run Voice setup: select/test a microphone, prepare local models, and learn the first commands
 - Push-to-talk browser demo and API endpoints for typed, uploaded-audio, and microphone commands
 - Configurable command transcription: automatic OpenAI `gpt-transcribe` when `OPENAI_API_KEY` is set, or local `faster-whisper` fallback
 - Optional OpenAI natural-language command understanding for unsupported phrasing, with strict function schemas and local allowlist validation
-- Optional Spotify Web API connection using Authorization Code with PKCE and no client secret
+- Local Spotify Desktop launch and explicit play/pause/track controls through Windows media sessions, without Spotify API credentials
+- Experimental Spotify Web API connection retained separately using Authorization Code with PKCE
 - Local Windows SAPI text-to-speech through `pyttsx3`
 - Deterministic English command router remains the first path for every command
-- Strict allowlisted execution for apps, fixed websites, bounded search, media keys, Spotify active-device controls, workspace shortcuts, notes, reminders, and settings
+- Strict allowlisted execution for apps, fixed websites, bounded search, Windows media controls, experimental Spotify API controls, workspace shortcuts, notes, reminders, and settings
 - Local notes, reminders, and settings stored under `~/Documents/DeskPilot`
 - Unit-tested services with mocked microphone, speech, wake word, process launching, and timers
 
@@ -25,7 +27,9 @@ Cloud interpretation never executes actions. It may only propose a strict typed 
 
 Safety is enforced with deterministic parsing and explicit allowlists. DeskPilot does not execute arbitrary text, shell commands, paths, URLs, or user-provided executables. Search queries are URL-encoded into trusted search endpoints, and custom aliases may only point to already-supported fixed commands.
 
-Spotify support uses the official Spotify Web API. DeskPilot opens the browser only after the explicit `connect spotify` command, requests only playback-state and playback-control scopes, stores the refresh token locally with Windows DPAPI for the current user, and controls only the user's active Spotify device. It does not use a Spotify client secret and does not automate Spotify's desktop UI with clicks or keystrokes.
+The public Spotify Desktop flow opens the fixed `spotify:` protocol and controls the current Windows media session. It requires no Spotify Web API, OAuth, tokens, developer account, or UI click automation. Mute and volume use fixed system media keys.
+
+The older Spotify Web API integration remains experimental. Its `connect spotify` command opens a browser for authorization, requests playback-state and playback-control scopes, and stores the token locally with Windows DPAPI for the current user. Public commands such as `play music` and `pause music` do not invoke that integration.
 
 See [SECURITY.md](SECURITY.md) for the safety model and disclosure guidance.
 
@@ -51,7 +55,16 @@ Run the native tray shell:
 python -m deskpilot_backend.desktop
 ```
 
-DeskPilot starts in the Windows system tray. Use the tray menu to start or stop wake-word listening, show or hide the overlay, or quit.
+DeskPilot starts in the Windows system tray and opens **Voice setup** until setup is saved. You can reopen it from the tray at any time.
+
+1. Choose a microphone and click **Test microphone · 3 seconds**. Speak normally while watching the input level. This local test does not save or transcribe audio.
+2. Click **Prepare voice models**. The window shows the wake-word and local-transcription preparation stages; missing files download in the background. Retry if preparation fails.
+3. Leave **Use local transcription and command matching (no cloud)** checked for local operation. Unchecked preserves your existing provider settings.
+4. Click **Save setup**, then choose **Start wake word listening** in the tray. Say **Hey Jarvis**, wait for the cue, then say **open calculator**.
+
+Saving does not start listening. **Later** leaves setup incomplete; the next launch or Start request reopens it. Opening setup pauses listening. Use the tray menu to start or stop listening, show/hide the overlay, or quit.
+
+See [DP-031 setup and validation](docs/dp-031-voice-setup.md) for troubleshooting and manual checks.
 
 ## Browser Demo
 
@@ -70,7 +83,7 @@ Native voice states:
 - Green: completed successfully, then hides
 - Red: recoverable error or unknown command, then hides
 
-The first wake-word start may download/cache openWakeWord's local `hey_jarvis` model. openWakeWord code is Apache-2.0 licensed, while its included pre-trained models are licensed CC BY-NC-SA 4.0.
+Voice setup prepares openWakeWord's local `hey_jarvis` model and the `tiny.en` local transcription model before the first command. Already-cached files are reused. openWakeWord code is Apache-2.0 licensed, while its included pre-trained models are licensed CC BY-NC-SA 4.0.
 
 For stronger native command transcription, set `OPENAI_API_KEY` before starting the tray app:
 
@@ -81,7 +94,20 @@ python -m deskpilot_backend.desktop
 
 Do not commit API keys. With the default `auto` providers, DeskPilot uses OpenAI only when this environment variable exists; otherwise it preserves local transcription and deterministic command routing. OpenAI usage may incur API cost.
 
-## Spotify Setup
+## Spotify Desktop Setup
+
+1. Install Spotify Desktop and sign in through Spotify itself.
+2. Start DeskPilot from source and choose `Start wake word listening` in the tray.
+3. Say `Hey Jarvis`, wait for the listening cue, then say `open spotify`.
+4. Use `play music`, `pause music`, `next track`, and `previous track`. If Windows has no media session, start a song in Spotify once and retry.
+
+No Spotify Developer app, `SPOTIFY_CLIENT_ID`, `connect spotify`, or DeskPilot OAuth token is needed. Windows chooses the current media session, so another active player can receive media commands. `open spotify` only opens the app; it does not select a song.
+
+For the manual validation record and remaining release checks, see [DP-030 validation](docs/dp-030-validation.md).
+
+## Experimental Spotify Web API Setup
+
+This retained integration is separate from the public v0.1 desktop flow. Use the explicit Spotify API commands below only when testing the experimental connector.
 
 Spotify controls are optional. They require a Spotify account with playback-control support, a Spotify Premium account for many playback-control API operations, and an active Spotify device.
 
@@ -101,7 +127,7 @@ python -m deskpilot_backend.desktop
 ```
 
 5. Say or type `connect spotify`. DeskPilot opens your browser for Spotify authorization, accepts one localhost callback on `127.0.0.1:8765`, then stores the protected refresh token under `~/Documents/DeskPilot`.
-6. Open Spotify once if Windows asks which app should handle `spotify:` links. Then use commands such as `play music`, `spotify status`, `pause spotify`, or `set spotify volume to 50`.
+6. Start playback on a Spotify device, then use experimental commands such as `play spotify`, `spotify status`, `pause spotify`, or `set spotify volume to 50`.
 
 Use `disconnect spotify` to delete the local protected token. DeskPilot never stores plaintext Spotify tokens in `settings.json`.
 
@@ -109,7 +135,7 @@ Use `disconnect spotify` to delete the local protected token. DeskPilot never st
 
 ```powershell
 python -m pytest
-python -m compileall src
+python -m compileall src tests
 ```
 
 ## Documentation
@@ -117,6 +143,9 @@ python -m compileall src
 - [Architecture](docs/architecture.md)
 - [90-second demo script](docs/demo-script.md)
 - [Windows build](docs/windows-build.md)
+- [DP-030 validation and release follow-up](docs/dp-030-validation.md)
+- [DP-031 voice setup](docs/dp-031-voice-setup.md)
+- [DP-032 Windows test distribution](docs/dp-032-windows-build.md)
 - [Security](SECURITY.md)
 
 ## Local Settings
@@ -132,6 +161,8 @@ DeskPilot stores local preferences in `~/Documents/DeskPilot/settings.json`. The
   "voice_transcription_provider": "auto",
   "voice_command_interpreter_provider": "auto",
   "default_music_app": "spotify",
+  "microphone_device": null,
+  "voice_setup_completed": false,
   "custom_aliases": {}
 }
 ```
@@ -155,6 +186,10 @@ Invalid provider values use `auto`.
 The interpreter uses `store=false`, strict function schemas, no OpenAI built-in tools, and one tool call. Returned tool arguments are validated locally before any action can run.
 
 `default_music_app` controls the exact `play music` command. Only `spotify` is supported for now; invalid values safely fall back to `spotify`.
+
+`microphone_device` is `null` for the system default, or an object with the selected device's `name` and `hostapi`. Native wake-word listening and command capture resolve that identity each time they open a stream, so a changed numeric device index does not select a different microphone. If a selected device disappears, reopen **Voice setup** and refresh. The development API microphone endpoint continues to use its default input.
+
+`voice_setup_completed` is set only by saving setup after a successful audio-signal test and model preparation. Older settings remain readable and show setup once. Saving updates the setup fields, and optionally the two provider settings when local mode is checked; it preserves aliases and other fields. Malformed or unsupported settings files are not overwritten.
 
 Custom aliases map one fixed phrase to an existing fixed command ID:
 
@@ -189,13 +224,14 @@ Application commands:
 - `open explorer`
 - `open settings`
 - `open browser`
+- `open spotify`
 - `open task manager`
 
 Settings commands:
 
 - `open deskpilot settings`
 
-Spotify commands:
+Experimental Spotify Web API commands (not required for local playback):
 
 - `connect spotify`
 - `disconnect spotify`
@@ -279,11 +315,13 @@ Media commands:
 - `previous song`
 - `previous track`
 
-`play music` opens the installed Spotify desktop app with a fixed Windows protocol target, waits briefly for the local Spotify desktop device to appear, transfers playback to that Computer device with playback enabled, and resumes playback through Spotify's Web API. If Spotify is not connected, DeskPilot still opens Spotify safely and asks you to say `connect spotify` to enable voice playback. DeskPilot will not automatically take control of a phone, speaker, TV, or restricted Spotify device.
+`play music` opens Spotify through the fixed `spotify:` target if no Spotify session is registered, then requests play on the current Windows media session. After launching, it waits briefly for a session if none exists. If Windows still has no current session, DeskPilot reports an error and asks you to start a song once.
 
-Other media controls use fixed Windows virtual media keys and affect the active Windows media session. Workspace shortcuts use fixed Windows targets only. Folder shortcuts are derived from known local user directories; DeskPilot never accepts spoken paths. System status commands are read-only and use standard-library or Windows `ctypes` calls.
+`pause music` requests an explicit pause, so repeating it cannot toggle playback on. Next and previous target the current Windows media session. For Spotify, `previous track` seeks an advanced track to its start, waits for the position update, then requests previous exactly once; a single voice command goes to the previous track. Other players retain their native previous behavior. Unsupported operations, rejected requests, and missing sessions produce errors instead of success responses.
 
-Spotify commands use HTTPS requests to Spotify's Web API. Generic media commands such as `pause music`, `next song`, and `previous track` remain Windows media-key commands and are not reinterpreted as Spotify commands.
+Mute toggles system mute, and volume commands adjust system volume with fixed Windows media keys; they do not require a playback session. Workspace shortcuts use fixed Windows targets only. Folder shortcuts are derived from known local user directories; DeskPilot never accepts spoken paths. System status commands are read-only and use standard-library or Windows `ctypes` calls.
+
+Only the experimental Spotify commands use Spotify HTTPS endpoints. They remain available in the router and help output for compatibility; `play music` and the public media commands never call them.
 
 Fixed-site commands use exact allowlisted HTTPS URLs. Search commands encode the query into the trusted search site's `q` parameter and open the results in the default browser; DeskPilot does not make direct HTTP requests.
 

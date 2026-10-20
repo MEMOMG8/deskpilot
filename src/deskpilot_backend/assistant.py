@@ -2,6 +2,7 @@ import os
 from collections.abc import Mapping
 
 from deskpilot_backend.actions import (
+    ActionExecutionError,
     KeyEventSender,
     ProcessLauncher,
     SystemStatusReader,
@@ -25,6 +26,7 @@ from deskpilot_backend.reminders import ReminderService
 from deskpilot_backend.settings import DeskPilotSettings, SettingsStore
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
 from deskpilot_backend.spotify import SpotifyService
+from deskpilot_backend.windows_media import MediaController
 
 
 def handle_assistant_command(
@@ -42,6 +44,7 @@ def handle_assistant_command(
     command_interpreter_provider: InterpreterProvider | None = None,
     clarification_store: ClarificationStore | None = None,
     on_recoverable_error: object | None = None,
+    media_controller: MediaController | None = None,
 ) -> AssistantCommandResponse:
     resolved_command = _resolve_pending_clarification(
         command.text,
@@ -82,6 +85,7 @@ def handle_assistant_command(
                 reminder_service=reminder_service,
                 settings_store=settings_store,
                 spotify_service=spotify_service,
+                media_controller=media_controller,
                 speech_engine_factory=speech_engine_factory,
             )
 
@@ -105,6 +109,7 @@ def handle_assistant_command(
         reminder_service=reminder_service,
         settings_store=settings_store,
         spotify_service=spotify_service,
+        media_controller=media_controller,
         speech_engine_factory=speech_engine_factory,
     )
 
@@ -120,6 +125,7 @@ def _execute_routed_command(
     reminder_service: ReminderService | None = None,
     settings_store: SettingsStore | None = None,
     spotify_service: SpotifyService | None = None,
+    media_controller: MediaController | None = None,
     speech_engine_factory: SpeechEngineFactory | None = None,
 ) -> AssistantCommandResponse:
     if routed_command.action is None:
@@ -131,21 +137,31 @@ def _execute_routed_command(
         )
         return _maybe_narrate_response(response, speak, speech_engine_factory)
 
-    action_response = execute_action(
-        ActionExecutionRequest(
-            type=routed_command.action.type,
-            target=routed_command.action.target,
-            query=routed_command.action.query,
-            minutes=routed_command.action.minutes,
-        ),
-        launcher=launcher,
-        key_event_sender=key_event_sender,
-        system_status_reader=system_status_reader,
-        note_store=note_store,
-        reminder_service=reminder_service,
-        settings_store=settings_store,
-        spotify_service=spotify_service,
-    )
+    try:
+        action_response = execute_action(
+            ActionExecutionRequest(
+                type=routed_command.action.type,
+                target=routed_command.action.target,
+                query=routed_command.action.query,
+                minutes=routed_command.action.minutes,
+            ),
+            launcher=launcher,
+            key_event_sender=key_event_sender,
+            system_status_reader=system_status_reader,
+            note_store=note_store,
+            reminder_service=reminder_service,
+            settings_store=settings_store,
+            spotify_service=spotify_service,
+            media_controller=media_controller,
+        )
+    except ActionExecutionError as error:
+        response = AssistantCommandResponse(
+            intent=routed_command.intent,
+            status="not_supported",
+            requires_confirmation=False,
+            message=str(error),
+        )
+        return _maybe_narrate_response(response, speak, speech_engine_factory)
 
     response = AssistantCommandResponse(
         intent=routed_command.intent,

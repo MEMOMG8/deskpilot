@@ -15,6 +15,7 @@ from deskpilot_backend.commands import HELP_MESSAGE
 from deskpilot_backend.models import AssistantCommandRequest
 from deskpilot_backend.main import (
     app,
+    get_media_controller,
     get_key_event_sender,
     get_note_store,
     get_process_launcher,
@@ -378,7 +379,6 @@ def test_assistant_information_commands_do_not_call_executor(
     [
         ("volume up", "volume_up", VK_VOLUME_UP, "Turning volume up."),
         ("turn volume up", "volume_up", VK_VOLUME_UP, "Turning volume up."),
-        ("pause music", "play_pause", VK_MEDIA_PLAY_PAUSE, "Toggling media playback."),
     ],
 )
 def test_assistant_media_commands_route_and_send_fixed_key_events(
@@ -410,12 +410,13 @@ def test_assistant_media_commands_route_and_send_fixed_key_events(
     assert key_event_sender.events == [(virtual_key, 0), (virtual_key, KEYEVENTF_KEYUP)]
 
 
-def test_assistant_play_music_uses_default_spotify_music_flow() -> None:
+def test_assistant_play_music_uses_local_windows_session(media_controller) -> None:
     launcher = RecordingLauncher()
     service = FakeSpotifyService()
     client = TestClient(app)
 
     with mocked_dependencies(launcher=launcher, spotify_service=service):
+        app.dependency_overrides[get_media_controller] = lambda: media_controller
         response = client.post(
             "/api/v1/assistant/commands",
             json={"text": "play music"},
@@ -426,16 +427,64 @@ def test_assistant_play_music_uses_default_spotify_music_flow() -> None:
         "intent": "default_music",
         "status": "executed",
         "requires_confirmation": False,
-        "message": "Opening Spotify and playing music.",
+        "message": "Playing the active Windows player.",
         "speech_result": "not_requested",
         "action": {"type": "default_music", "target": "play"},
     }
     assert launcher.commands == [["explorer.exe", "spotify:"]]
-    assert service.calls == [
-        ("devices", None),
-        ("devices", None),
-        ("transfer", ("desktop-after-launch", True)),
-    ]
+    assert service.calls == []
+    assert media_controller.calls == ["play"]
+
+
+def test_assistant_pause_calls_explicit_session_pause(media_controller):
+    sender = RecordingKeyEventSender()
+    response = handle_assistant_command(
+        AssistantCommandRequest(text="pause music"),
+        media_controller=media_controller, key_event_sender=sender,
+    )
+    assert response.status == "executed"
+    assert response.action.target == "pause"
+    assert media_controller.calls == ["pause"]
+    assert sender.events == []
+
+
+@pytest.mark.parametrize("phrase", ["open spotify", "play music", "pause music", "next track"])
+def test_public_failures_are_reported_and_spoken_without_success(phrase, media_controller):
+    from deskpilot_backend.windows_media import MediaControlError, NO_SESSION_MESSAGE
+
+    def failing_launcher(command):
+        raise OSError("protocol unavailable")
+
+    media_controller.spotify_open = True
+    media_controller.error = MediaControlError(NO_SESSION_MESSAGE)
+    engine = FakeSpeechEngine()
+    response = handle_assistant_command(
+        AssistantCommandRequest(text=phrase, speak=True),
+        launcher=failing_launcher,
+        media_controller=media_controller,
+        speech_engine_factory=lambda: engine,
+    )
+    assert response.status == "not_supported"
+    assert response.action is None
+    assert response.speech_result == "completed"
+    assert engine.spoken_text == [response.message]
+    if phrase == "open spotify":
+        assert "couldn't open Spotify Desktop" in response.message
+    else:
+        assert response.message == NO_SESSION_MESSAGE
+
+
+def test_actions_endpoint_returns_error_for_missing_session(media_controller):
+    from deskpilot_backend.windows_media import MediaControlError, NO_SESSION_MESSAGE
+
+    media_controller.error = MediaControlError(NO_SESSION_MESSAGE)
+    with mocked_dependencies():
+        app.dependency_overrides[get_media_controller] = lambda: media_controller
+        response = TestClient(app).post(
+            "/api/v1/actions/execute", json={"type": "media_key", "target": "pause"}
+        )
+    assert response.status_code == 400
+    assert response.json() == {"detail": NO_SESSION_MESSAGE}
 
 
 @pytest.mark.parametrize(

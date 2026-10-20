@@ -19,6 +19,7 @@ from deskpilot_backend.main import app
         ("open explorer", "file_explorer", "File Explorer"),
         ("open settings", "settings", "Windows Settings"),
         ("open browser", "browser", "the default browser"),
+        ("open spotify", "spotify", "Spotify"),
     ],
 )
 def test_application_commands_are_recognized(
@@ -161,7 +162,7 @@ def test_commands_endpoint_rejects_invalid_search_query() -> None:
         ("turn volume down", "volume_down"),
         ("mute", "mute"),
         ("mute volume", "mute"),
-        ("pause music", "play_pause"),
+        ("pause music", "pause"),
         ("next song", "next_track"),
         ("next track", "next_track"),
         ("previous song", "previous_track"),
@@ -638,3 +639,8 @@ def test_commands_endpoint_rejects_blank_text() -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"][0]["msg"] == "Value error, text must not be empty"
+
+
+def test_open_spotify_is_exact_not_an_arbitrary_launch():
+    for phrase in ("open spotify please", "open spotify.exe", "open spotify https://example.com"):
+        assert route_command(phrase).status == "not_supported"

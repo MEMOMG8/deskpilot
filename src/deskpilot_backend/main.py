@@ -42,6 +42,7 @@ from deskpilot_backend.microphone import (
 )
 from deskpilot_backend.speech import SpeechEngineError, SpeechEngineFactory, speak_text
 from deskpilot_backend.spotify import SpotifyService
+from deskpilot_backend.windows_media import MediaController, WindowsMediaController
 from deskpilot_backend.transcription import (
     EmptyAudioError,
     TranscriptionServiceError,
@@ -83,6 +84,10 @@ def get_reminder_service() -> ReminderService:
 
 def get_spotify_service() -> SpotifyService:
     return spotify_service
+
+
+def get_media_controller() -> MediaController:
+    return WindowsMediaController()
 
 
 def get_settings_store() -> SettingsStore:
@@ -141,6 +146,7 @@ def execute_planned_action(
     reminders: ReminderService = Depends(get_reminder_service),
     settings_store: SettingsStore = Depends(get_settings_store),
     spotify: SpotifyService = Depends(get_spotify_service),
+    media: MediaController = Depends(get_media_controller),
 ) -> ActionExecutionResponse:
     try:
         return execute_action(
@@ -152,6 +158,7 @@ def execute_planned_action(
             reminder_service=reminders,
             settings_store=settings_store,
             spotify_service=spotify,
+            media_controller=media,
         )
     except UnsupportedActionError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -171,6 +178,7 @@ def create_assistant_command(
     reminders: ReminderService = Depends(get_reminder_service),
     settings_store: SettingsStore = Depends(get_settings_store),
     spotify: SpotifyService = Depends(get_spotify_service),
+    media: MediaController = Depends(get_media_controller),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
     clarifications: ClarificationStore = Depends(get_clarification_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
@@ -187,6 +195,7 @@ def create_assistant_command(
             reminder_service=reminders,
             settings_store=settings_store,
             spotify_service=spotify,
+            media_controller=media,
             speech_engine_factory=speech_engine_factory,
             command_interpreter=interpreter,
             clarification_store=clarifications,
@@ -245,6 +254,7 @@ async def create_voice_command(
     reminders: ReminderService = Depends(get_reminder_service),
     settings_store: SettingsStore = Depends(get_settings_store),
     spotify: SpotifyService = Depends(get_spotify_service),
+    media: MediaController = Depends(get_media_controller),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
     clarifications: ClarificationStore = Depends(get_clarification_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
@@ -267,6 +277,7 @@ async def create_voice_command(
             reminder_service=reminders,
             settings_store=settings_store,
             spotify_service=spotify,
+            media_controller=media,
             speech_engine_factory=speech_engine_factory,
             command_interpreter=interpreter,
             clarification_store=clarifications,
@@ -299,6 +310,7 @@ def create_microphone_command(
     reminders: ReminderService = Depends(get_reminder_service),
     settings_store: SettingsStore = Depends(get_settings_store),
     spotify: SpotifyService = Depends(get_spotify_service),
+    media: MediaController = Depends(get_media_controller),
     interpreter: CommandInterpreter = Depends(get_command_interpreter),
     clarifications: ClarificationStore = Depends(get_clarification_store),
     speech_engine_factory: SpeechEngineFactory | None = Depends(
@@ -320,6 +332,7 @@ def create_microphone_command(
             reminder_service=reminders,
             settings_store=settings_store,
             spotify_service=spotify,
+            media_controller=media,
             speech_engine_factory=speech_engine_factory,
             command_interpreter=interpreter,
             clarification_store=clarifications,

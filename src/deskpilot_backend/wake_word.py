@@ -73,6 +73,9 @@ class WakeWordService:
 
         try:
             self._model = self._model_factory()
+            reset = getattr(self._model, "reset", None)
+            if callable(reset):
+                reset()  # Reused models must not keep audio/predictions from the previous listen.
             self._stop_event.clear()
             self._worker = threading.Thread(
                 target=self._run_worker,
@@ -160,10 +163,15 @@ class WakeWordService:
 def create_openwakeword_model() -> WakeWordModel:
     try:
         from openwakeword.model import Model
-        from openwakeword.utils import download_models
+        from deskpilot_backend.model_cache import ensure_wake_models
 
-        download_models(model_names=[WAKE_WORD_MODEL])
-        return Model(wakeword_models=[WAKE_WORD_MODEL], inference_framework="onnx")
+        directory = ensure_wake_models()
+        return Model(
+            wakeword_models=[str(directory / "hey_jarvis_v0.1.onnx")],
+            melspec_model_path=str(directory / "melspectrogram.onnx"),
+            embedding_model_path=str(directory / "embedding_model.onnx"),
+            inference_framework="onnx",
+        )
     except Exception as error:
         LOGGER.exception("Wake-word model initialization failed.")
         raise WakeWordError("Wake-word model is unavailable.") from error
@@ -171,11 +179,15 @@ def create_openwakeword_model() -> WakeWordModel:
 
 def create_sounddevice_stream(
     callback: Callable[[object, int, object, object], None],
+    *,
+    device: dict[str, str] | None = None,
 ) -> AudioStream:
     try:
         import sounddevice
+        from deskpilot_backend.audio_devices import resolve_input_device
 
         return sounddevice.InputStream(
+            device=resolve_input_device(device, sounddevice),
             samplerate=SAMPLE_RATE,
             channels=CHANNELS,
             dtype=DTYPE,

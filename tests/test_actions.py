@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from deskpilot_backend.actions import (
+    ActionExecutionError,
     KEYEVENTF_KEYUP,
     VK_MEDIA_NEXT_TRACK,
     VK_MEDIA_PLAY_PAUSE,
@@ -28,6 +29,7 @@ from deskpilot_backend.main import (
     get_spotify_service,
     get_system_status_reader,
 )
+from deskpilot_backend.windows_media import MediaControlError, NO_SESSION_MESSAGE
 from deskpilot_backend.models import ActionExecutionRequest
 from deskpilot_backend.notes import NoteStore, format_latest_note, format_note_count
 from deskpilot_backend.reminders import ReminderService
@@ -286,8 +288,6 @@ def test_build_search_url_uses_q_parameter_only() -> None:
         ("volume_down", VK_VOLUME_DOWN, "Turning volume down."),
         ("mute", VK_VOLUME_MUTE, "Toggling mute."),
         ("play_pause", VK_MEDIA_PLAY_PAUSE, "Toggling media playback."),
-        ("next_track", VK_MEDIA_NEXT_TRACK, "Skipping to the next track."),
-        ("previous_track", VK_MEDIA_PREV_TRACK, "Going to the previous track."),
     ],
 )
 def test_media_key_actions_are_allowed_with_fixed_key_events(
@@ -390,332 +390,109 @@ def test_spotify_not_connected_and_no_active_device_are_user_friendly() -> None:
     not_connected = NotConnectedSpotify()
     no_device = NoDeviceSpotify()
 
-    not_connected_response = execute_action(
-        ActionExecutionRequest(type="spotify", target="status"),
-        spotify_service=not_connected,
-    )
-    no_device_response = execute_action(
-        ActionExecutionRequest(type="spotify", target="play"),
-        spotify_service=no_device,
-    )
-
-    assert not_connected_response.message == (
-        "Spotify is not connected. Say connect spotify."
-    )
-    assert no_device_response.message == (
-        "No active Spotify device. Open Spotify and play something first."
-    )
+    with pytest.raises(ActionExecutionError, match="Spotify is not connected"):
+        execute_action(
+            ActionExecutionRequest(type="spotify", target="status"),
+            spotify_service=not_connected,
+        )
+    with pytest.raises(ActionExecutionError, match="No active Spotify device"):
+        execute_action(
+            ActionExecutionRequest(type="spotify", target="play"),
+            spotify_service=no_device,
+        )
 
 
-def test_default_music_captures_devices_before_launch_and_plays_new_desktop(
-    tmp_path,
-) -> None:
-    events: list[str] = []
-    launcher = RecordingLauncher(events)
-    service = FakeSpotifyService(
-        device_results=[
-            [],
-            [spotify_device("desktop-after-launch")],
-        ],
-        events=events,
-    )
-    sleeps: list[float] = []
+def test_default_music_is_local_without_oauth_tokens_or_http(tmp_path, monkeypatch, media_controller):
+    import deskpilot_backend.spotify as spotify
+    import urllib.request
 
+    def forbidden(*args, **kwargs):
+        pytest.fail("Public media must not construct Spotify services, read tokens or use HTTP")
+
+    monkeypatch.delenv("SPOTIFY_CLIENT_ID", raising=False)
+    monkeypatch.setattr(spotify.SpotifyService, "__init__", forbidden)
+    monkeypatch.setattr(spotify.DpapiSpotifyTokenStore, "load", forbidden)
+    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    launcher = RecordingLauncher()
     response = execute_action(
         ActionExecutionRequest(type="default_music", target="play"),
         launcher=launcher,
-        spotify_service=service,
         settings_store=SettingsStore(tmp_path / "settings.json"),
-        sleeper=sleeps.append,
+        media_controller=media_controller,
     )
-
     assert response.executed is True
-    assert response.message == "Opening Spotify and playing music."
+    assert response.message == "Playing the active Windows player."
     assert launcher.commands == [["explorer.exe", "spotify:"]]
-    assert service.calls == [
-        ("devices", None),
-        ("devices", None),
-        ("transfer", ("desktop-after-launch", True)),
-    ]
-    assert events == ["devices", "launch", "devices"]
-    assert sleeps == []
+    assert media_controller.calls == ["play"]
 
 
-def test_default_music_success_is_not_overridden_by_status_unavailability() -> None:
-    class StatusUnavailableSpotify(FakeSpotifyService):
-        def status(self) -> str:
-            self.calls.append(("status", None))
-            raise SpotifyError("raw status detail")
+@pytest.mark.parametrize("target", ["pause", "next_track", "previous_track"])
+def test_local_session_actions_are_allowlisted(target, media_controller):
+    sender = RecordingKeyEventSender()
+    response = execute_action(
+        ActionExecutionRequest(type="media_key", target=target),
+        media_controller=media_controller, key_event_sender=sender,
+    )
+    assert response.executed is True
+    assert media_controller.calls == [target]
+    assert sender.events == []
 
+
+@pytest.mark.parametrize("action_type,target", [
+    ("default_music", "play"), ("media_key", "pause"),
+    ("media_key", "next_track"), ("media_key", "previous_track"),
+])
+def test_missing_session_does_not_return_executed(action_type, target, media_controller):
+    media_controller.error = MediaControlError(NO_SESSION_MESSAGE)
+    with pytest.raises(ActionExecutionError, match="No active Windows media session"):
+        execute_action(
+            ActionExecutionRequest(type=action_type, target=target),
+            launcher=RecordingLauncher(), media_controller=media_controller,
+        )
+
+
+@pytest.mark.parametrize("action_type,target", [("open_app", "spotify"), ("default_music", "play")])
+def test_spotify_launch_failure_is_not_success(action_type, target, media_controller):
+    def failing_launcher(command):
+        raise OSError("no handler")
+
+    with pytest.raises(ActionExecutionError, match="couldn't open Spotify Desktop"):
+        execute_action(
+            ActionExecutionRequest(type=action_type, target=target),
+            launcher=failing_launcher, media_controller=media_controller,
+        )
+    assert media_controller.calls == []
+
+
+def test_failed_media_control_is_not_success(media_controller):
+    media_controller.error = MediaControlError("The active Windows player rejected the command.")
+    with pytest.raises(ActionExecutionError, match="rejected"):
+        execute_action(
+            ActionExecutionRequest(type="default_music", target="play"),
+            launcher=RecordingLauncher(), media_controller=media_controller,
+        )
+
+
+def test_default_music_does_not_reopen_existing_spotify(media_controller):
+    media_controller.spotify_open = True
     launcher = RecordingLauncher()
-    service = StatusUnavailableSpotify(
-        device_results=[
-            [],
-            [spotify_device("desktop-after-launch")],
-        ],
-    )
-
-    response = execute_action(
+    execute_action(
         ActionExecutionRequest(type="default_music", target="play"),
-        launcher=launcher,
-        spotify_service=service,
-        sleeper=lambda _seconds: None,
+        launcher=launcher, media_controller=media_controller,
     )
-
-    assert response.message == "Opening Spotify and playing music."
-    assert service.calls == [
-        ("devices", None),
-        ("devices", None),
-        ("transfer", ("desktop-after-launch", True)),
-    ]
+    assert launcher.commands == []
+    assert media_controller.calls == ["play"]
 
 
-def test_default_music_waits_for_delayed_desktop_device() -> None:
-    launcher = RecordingLauncher()
-    service = FakeSpotifyService(
-        device_results=[
-            [],
-            [],
-            [],
-            [spotify_device("desktop-after-delay")],
-        ],
-    )
-    sleeps: list[float] = []
+def test_real_protocol_launcher_reports_missing_handler(monkeypatch):
+    import deskpilot_backend.actions as actions
 
-    response = execute_action(
-        ActionExecutionRequest(type="default_music", target="play"),
-        launcher=launcher,
-        spotify_service=service,
-        sleeper=sleeps.append,
-    )
+    def unavailable():
+        raise OSError("protocol is missing")
 
-    assert response.message == "Opening Spotify and playing music."
-    assert launcher.commands == [["explorer.exe", "spotify:"]]
-    assert service.calls == [
-        ("devices", None),
-        ("devices", None),
-        ("devices", None),
-        ("devices", None),
-        ("transfer", ("desktop-after-delay", True)),
-    ]
-    assert sleeps == [0.5, 0.5]
-
-
-def test_default_music_can_use_unambiguous_known_computer_device() -> None:
-    launcher = RecordingLauncher()
-    service = FakeSpotifyService(
-        device_results=[
-            [spotify_device("known-desktop")],
-            [spotify_device("known-desktop")],
-        ],
-    )
-
-    response = execute_action(
-        ActionExecutionRequest(type="default_music", target="play"),
-        launcher=launcher,
-        spotify_service=service,
-        sleeper=lambda _seconds: None,
-    )
-
-    assert response.message == "Opening Spotify and playing music."
-    assert service.calls == [
-        ("devices", None),
-        ("devices", None),
-        ("transfer", ("known-desktop", True)),
-    ]
-
-
-def test_default_music_reports_no_active_spotify_device_after_bounded_wait() -> None:
-    launcher = RecordingLauncher()
-    service = FakeSpotifyService(
-        device_results=[[]] * 20,
-    )
-    sleeps: list[float] = []
-
-    response = execute_action(
-        ActionExecutionRequest(type="default_music", target="play"),
-        launcher=launcher,
-        spotify_service=service,
-        sleeper=sleeps.append,
-    )
-
-    assert response.message == (
-        "Spotify is open. Start a song there once, then I can control it."
-    )
-    assert launcher.commands == [["explorer.exe", "spotify:"]]
-    assert service.calls == [("devices", None)] * 18
-    assert sleeps == [0.5] * 16
-
-
-@pytest.mark.parametrize(
-    "device",
-    [
-        spotify_device("phone", device_type="Smartphone"),
-        spotify_device("speaker", device_type="Speaker"),
-        spotify_device("tv", device_type="TV"),
-        spotify_device("restricted", is_restricted=True),
-    ],
-)
-def test_default_music_does_not_transfer_to_remote_or_restricted_devices(
-    device: SpotifyDevice,
-) -> None:
-    launcher = RecordingLauncher()
-    service = FakeSpotifyService(device_results=[[], [device]] * 9)
-    sleeps: list[float] = []
-
-    response = execute_action(
-        ActionExecutionRequest(type="default_music", target="play"),
-        launcher=launcher,
-        spotify_service=service,
-        sleeper=sleeps.append,
-    )
-
-    assert response.message == (
-        "Spotify is open. Start a song there once, then I can control it."
-    )
-    assert ("transfer", (device.id, True)) not in service.calls
-    assert ("play", None) not in service.calls
-    assert len(sleeps) == 16
-
-
-def test_default_music_does_not_transfer_away_from_active_remote_device() -> None:
-    launcher = RecordingLauncher()
-    service = FakeSpotifyService(
-        device_results=[
-            [spotify_device("phone", device_type="Smartphone", is_active=True)],
-            [
-                spotify_device("phone", device_type="Smartphone", is_active=True),
-                spotify_device("desktop-after-launch"),
-            ],
-        ]
-        * 9,
-    )
-    sleeps: list[float] = []
-
-    response = execute_action(
-        ActionExecutionRequest(type="default_music", target="play"),
-        launcher=launcher,
-        spotify_service=service,
-        sleeper=sleeps.append,
-    )
-
-    assert response.message == (
-        "Spotify is open. Start a song there once, then I can control it."
-    )
-    assert ("transfer", ("desktop-after-launch", True)) not in service.calls
-    assert ("play", None) not in service.calls
-    assert len(sleeps) == 16
-
-
-def test_default_music_does_not_transfer_away_from_another_active_computer() -> None:
-    launcher = RecordingLauncher()
-    service = FakeSpotifyService(
-        device_results=[
-            [spotify_device("office-desktop", is_active=True)]
-        ]
-        + [
-            [
-                spotify_device("office-desktop", is_active=True),
-                spotify_device("new-local-desktop"),
-            ]
-        ]
-        * 17,
-    )
-    sleeps: list[float] = []
-
-    response = execute_action(
-        ActionExecutionRequest(type="default_music", target="play"),
-        launcher=launcher,
-        spotify_service=service,
-        sleeper=sleeps.append,
-    )
-
-    assert response.message == (
-        "Spotify is open. Start a song there once, then I can control it."
-    )
-    assert ("transfer", ("new-local-desktop", True)) not in service.calls
-    assert ("play", None) not in service.calls
-    assert len(sleeps) == 16
-
-
-def test_default_music_opens_spotify_when_disconnected() -> None:
-    launcher = RecordingLauncher()
-    service = FakeSpotifyService(
-        device_results=[SpotifyNotConnectedError("Spotify is not connected.")]
-    )
-
-    response = execute_action(
-        ActionExecutionRequest(type="default_music", target="play"),
-        launcher=launcher,
-        spotify_service=service,
-        sleeper=lambda _seconds: None,
-    )
-
-    assert response.message == (
-        "Spotify is not connected. Say connect spotify to enable voice playback."
-    )
-    assert launcher.commands == [["explorer.exe", "spotify:"]]
-    assert service.calls == [("devices", None)]
-
-
-def test_default_music_launch_failure_does_not_call_spotify_api() -> None:
-    class FailingLauncher:
-        def __init__(self) -> None:
-            self.commands: list[list[str]] = []
-
-        def __call__(self, command: list[str]) -> object:
-            self.commands.append(command)
-            raise OSError("spotify unavailable")
-
-    launcher = FailingLauncher()
-    service = FakeSpotifyService(device_results=[[]])
-
-    response = execute_action(
-        ActionExecutionRequest(type="default_music", target="play"),
-        launcher=launcher,
-        spotify_service=service,
-    )
-
-    assert response.message == "I couldn't open Spotify."
-    assert launcher.commands == [["explorer.exe", "spotify:"]]
-    assert service.calls == [("devices", None)]
-
-
-def test_default_music_maps_spotify_api_errors_to_controlled_message() -> None:
-    launcher = RecordingLauncher()
-    service = FakeSpotifyService(device_results=[SpotifyError("raw HTTP detail")])
-
-    response = execute_action(
-        ActionExecutionRequest(type="default_music", target="play"),
-        launcher=launcher,
-        spotify_service=service,
-    )
-
-    assert response.message == "Spotify playback is unavailable."
-    assert launcher.commands == [["explorer.exe", "spotify:"]]
-    assert service.calls == [("devices", None)]
-
-
-def test_default_music_maps_transfer_failure_to_controlled_message() -> None:
-    launcher = RecordingLauncher()
-    service = FakeSpotifyService(
-        device_results=[[], [spotify_device("desktop-after-launch")]],
-        transfer_results=[SpotifyError("raw transfer detail")],
-    )
-
-    response = execute_action(
-        ActionExecutionRequest(type="default_music", target="play"),
-        launcher=launcher,
-        spotify_service=service,
-    )
-
-    assert response.message == "Spotify playback is unavailable."
-    assert launcher.commands == [["explorer.exe", "spotify:"]]
-    assert service.calls == [
-        ("devices", None),
-        ("devices", None),
-        ("transfer", ("desktop-after-launch", True)),
-    ]
+    monkeypatch.setattr(actions, "_open_spotify_protocol", unavailable)
+    with pytest.raises(ActionExecutionError, match="protocol registration"):
+        execute_action(ActionExecutionRequest(type="open_app", target="spotify"))
 
 
 @pytest.mark.parametrize(

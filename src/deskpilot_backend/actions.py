@@ -2,7 +2,6 @@ import ctypes
 import os
 import subprocess
 import sys
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +9,12 @@ from shutil import disk_usage
 from urllib.parse import urlencode
 
 from deskpilot_backend.models import ActionExecutionRequest, ActionExecutionResponse
+from deskpilot_backend.windows_media import (
+    MediaController,
+    MediaControlError,
+    MediaOperation,
+    WindowsMediaController,
+)
 from deskpilot_backend.notes import (
     MAX_NOTE_TEXT_LENGTH,
     NoteStore,
@@ -24,7 +29,6 @@ from deskpilot_backend.reminders import (
 )
 from deskpilot_backend.settings import SettingsStore, SettingsStoreError
 from deskpilot_backend.spotify import (
-    SpotifyDevice,
     SpotifyError,
     SpotifyNoActiveDeviceError,
     SpotifyNotConnectedError,
@@ -46,8 +50,6 @@ DEFAULT_MUSIC_ACTION_TYPE = "default_music"
 MAX_SEARCH_QUERY_LENGTH = 120
 DEFAULT_MUSIC_APP = "spotify"
 SPOTIFY_APP_COMMAND = ("explorer.exe", "spotify:")
-SPOTIFY_ACTIVE_DEVICE_WAIT_SECONDS = 8.0
-SPOTIFY_ACTIVE_DEVICE_POLL_SECONDS = 0.5
 KEYEVENTF_KEYUP = 0x0002
 VK_VOLUME_MUTE = 0xAD
 VK_VOLUME_DOWN = 0xAE
@@ -59,7 +61,6 @@ VK_MEDIA_PLAY_PAUSE = 0xB3
 ProcessLauncher = Callable[[Sequence[str]], object]
 KeyEventSender = Callable[[int, int], object]
 SystemStatusReader = Callable[[str], str]
-SleepFunction = Callable[[float], object]
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ class ActionDefinition:
     settings_operation: str | None = None
     spotify_operation: str | None = None
     default_music_operation: str | None = None
+    media_operation: MediaOperation | None = None
     unsupported_platform_message: str | None = None
 
 
@@ -133,14 +135,19 @@ ACTION_REGISTRY = {
         virtual_key=VK_MEDIA_PLAY_PAUSE,
         message="Toggling media playback.",
     ),
+    (MEDIA_KEY_ACTION_TYPE, "pause"): ActionDefinition(
+        action_type=MEDIA_KEY_ACTION_TYPE,
+        media_operation="pause",
+        message="Pausing the active Windows player.",
+    ),
     (MEDIA_KEY_ACTION_TYPE, "next_track"): ActionDefinition(
         action_type=MEDIA_KEY_ACTION_TYPE,
-        virtual_key=VK_MEDIA_NEXT_TRACK,
+        media_operation="next_track",
         message="Skipping to the next track.",
     ),
     (MEDIA_KEY_ACTION_TYPE, "previous_track"): ActionDefinition(
         action_type=MEDIA_KEY_ACTION_TYPE,
-        virtual_key=VK_MEDIA_PREV_TRACK,
+        media_operation="previous_track",
         message="Going to the previous track.",
     ),
     (WORKSPACE_SHORTCUT_ACTION_TYPE, "downloads"): ActionDefinition(
@@ -314,6 +321,10 @@ class UnsupportedActionError(ValueError):
     """Raised when an action is not on DeskPilot's execution allowlist."""
 
 
+class ActionExecutionError(UnsupportedActionError):
+    """An allowed action failed; callers must not report it as executed."""
+
+
 def execute_action(
     action: ActionExecutionRequest,
     launcher: ProcessLauncher | None = None,
@@ -323,7 +334,7 @@ def execute_action(
     reminder_service: ReminderService | None = None,
     settings_store: SettingsStore | None = None,
     spotify_service: SpotifyService | None = None,
-    sleeper: SleepFunction | None = None,
+    media_controller: MediaController | None = None,
 ) -> ActionExecutionResponse:
     if action.type not in SUPPORTED_ACTION_TYPES:
         raise UnsupportedActionError(f"Unsupported action type: {action.type}")
@@ -343,13 +354,30 @@ def execute_action(
             action_definition.workspace_directory
         )
         process_launcher(["explorer.exe", str(workspace_path)])
+    elif action.type == OPEN_APP_ACTION_TYPE and action.target == "spotify":
+        try:
+            launch_spotify(launcher=launcher)
+        except MediaControlError as error:
+            raise ActionExecutionError(str(error)) from error
     elif action_definition.command is not None:
         process_launcher = launcher or subprocess.Popen
         process_launcher(list(action_definition.command))
     elif action_definition.virtual_key is not None:
         sender = key_event_sender or send_windows_key_event
-        sender(action_definition.virtual_key, 0)
-        sender(action_definition.virtual_key, KEYEVENTF_KEYUP)
+        try:
+            sender(action_definition.virtual_key, 0)
+            sender(action_definition.virtual_key, KEYEVENTF_KEYUP)
+        except UnsupportedActionError as error:
+            raise ActionExecutionError(str(error)) from error
+        except OSError as error:
+            raise ActionExecutionError("Windows media keys are unavailable.") from error
+    elif action_definition.media_operation is not None:
+        try:
+            (media_controller or WindowsMediaController()).control(
+                action_definition.media_operation
+            )
+        except MediaControlError as error:
+            raise ActionExecutionError(str(error)) from error
     elif action_definition.status_target is not None:
         reader = system_status_reader or read_windows_system_status
         message = reader(action_definition.status_target)
@@ -389,9 +417,8 @@ def execute_action(
         message = execute_default_music_operation(
             action_definition.default_music_operation,
             launcher=launcher,
-            spotify_service=spotify_service,
             settings_store=settings_store,
-            sleeper=sleeper,
+            media_controller=media_controller,
         )
 
     return ActionExecutionResponse(
@@ -426,12 +453,8 @@ def execute_spotify_operation(
             return service.previous_track()
         if operation == "volume":
             return service.set_volume(validate_spotify_volume(action.query))
-    except (SpotifyNotConnectedError, SpotifyNoActiveDeviceError) as error:
-        return str(error)
-    except SpotifyOAuthError as error:
-        return str(error)
     except SpotifyError as error:
-        raise UnsupportedActionError(str(error)) from error
+        raise ActionExecutionError(str(error)) from error
 
     raise UnsupportedActionError(f"Unsupported Spotify operation: {operation}")
 
@@ -440,133 +463,74 @@ def execute_default_music_operation(
     operation: str,
     *,
     launcher: ProcessLauncher | None = None,
-    spotify_service: SpotifyService | None = None,
     settings_store: SettingsStore | None = None,
-    sleeper: SleepFunction | None = None,
+    media_controller: MediaController | None = None,
 ) -> str:
     if operation != "play":
         raise UnsupportedActionError(f"Unsupported default music operation: {operation}")
-
     if _load_default_music_app(settings_store) != DEFAULT_MUSIC_APP:
         raise UnsupportedActionError("Default music app is not supported.")
 
-    service = spotify_service or SpotifyService()
-    known_device_ids: set[str] = set()
-    prelaunch_message: str | None = None
     try:
-        known_device_ids = {device.id for device in service.available_devices()}
-    except SpotifyNotConnectedError:
-        prelaunch_message = (
-            "Spotify is not connected. Say connect spotify to enable voice playback."
+        (media_controller or WindowsMediaController()).control(
+            "play", ensure_spotify_open=lambda: launch_spotify(launcher=launcher)
         )
-    except (SpotifyOAuthError, SpotifyError):
-        prelaunch_message = "Spotify playback is unavailable."
-
-    launch_message = launch_spotify(launcher=launcher)
-    if launch_message is not None:
-        return launch_message
-
-    if prelaunch_message is not None:
-        return prelaunch_message
-
-    return play_spotify_after_launch(
-        spotify_service=service,
-        known_device_ids=known_device_ids,
-        sleeper=sleeper,
-    )
+    except MediaControlError as error:
+        raise ActionExecutionError(str(error)) from error
+    return "Playing the active Windows player."
 
 
-def launch_spotify(*, launcher: ProcessLauncher | None = None) -> str | None:
-    process_launcher = launcher or subprocess.Popen
+def launch_spotify(*, launcher: ProcessLauncher | None = None) -> None:
     try:
-        process_launcher(list(SPOTIFY_APP_COMMAND))
-    except OSError:
-        return "I couldn't open Spotify."
-
-    return None
-
-
-def play_spotify_after_launch(
-    *,
-    spotify_service: SpotifyService,
-    known_device_ids: set[str],
-    sleeper: SleepFunction | None = None,
-) -> str:
-    service = spotify_service
-    sleep = sleeper or time.sleep
-    attempts = max(
-        1,
-        int(SPOTIFY_ACTIVE_DEVICE_WAIT_SECONDS / SPOTIFY_ACTIVE_DEVICE_POLL_SECONDS)
-        + 1,
-    )
-
-    for attempt in range(attempts):
-        try:
-            current_devices = service.available_devices()
-            target_device = select_spotify_desktop_device(
-                known_device_ids,
-                current_devices,
-            )
-            if target_device is not None:
-                service.transfer_playback(target_device.id, play=True)
-                return "Opening Spotify and playing music."
-        except SpotifyNotConnectedError:
-            return "Spotify is not connected. Say connect spotify to enable voice playback."
-        except (SpotifyOAuthError, SpotifyError):
-            return "Spotify playback is unavailable."
-
-        if attempt < attempts - 1:
-            sleep(SPOTIFY_ACTIVE_DEVICE_POLL_SECONDS)
-            continue
-
-        return "Spotify is open. Start a song there once, then I can control it."
-
-    return "Spotify is open. Start a song there once, then I can control it."
+        if launcher is not None:
+            launcher(list(SPOTIFY_APP_COMMAND))
+        else:
+            _open_spotify_protocol()
+    except OSError as error:
+        raise MediaControlError(
+            "I couldn't open Spotify Desktop. Install Spotify and check its spotify: protocol registration."
+        ) from error
 
 
-def select_spotify_desktop_device(
-    known_device_ids: set[str],
-    devices: Sequence[SpotifyDevice],
-) -> SpotifyDevice | None:
-    eligible_devices = [device for device in devices if is_eligible_spotify_desktop(device)]
+def _open_spotify_protocol() -> None:
+    # ShellExecuteEx reports missing protocol handlers; spawning Explorer cannot.
+    # NO_UI suppresses shell error dialogs. Only this fixed protocol is accepted.
+    from ctypes import wintypes
 
-    newly_available = [
-        device for device in eligible_devices if device.id not in known_device_ids
-    ]
-    if len(newly_available) == 1:
-        return _spotify_device_if_not_transferring_from_active_device(
-            newly_available[0],
-            devices,
-        )
+    class ShellExecuteInfo(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD), ("fMask", wintypes.ULONG),
+            ("hwnd", wintypes.HWND), ("lpVerb", wintypes.LPCWSTR),
+            ("lpFile", wintypes.LPCWSTR), ("lpParameters", wintypes.LPCWSTR),
+            ("lpDirectory", wintypes.LPCWSTR), ("nShow", ctypes.c_int),
+            ("hInstApp", wintypes.HINSTANCE), ("lpIDList", ctypes.c_void_p),
+            ("lpClass", wintypes.LPCWSTR), ("hkeyClass", wintypes.HKEY),
+            ("dwHotKey", wintypes.DWORD), ("hIconOrMonitor", wintypes.HANDLE),
+            ("hProcess", wintypes.HANDLE),
+        ]
 
-    if len(newly_available) > 1:
-        return None
-
-    if len(eligible_devices) == 1:
-        return _spotify_device_if_not_transferring_from_active_device(
-            eligible_devices[0],
-            devices,
-        )
-
-    return None
-
-
-def is_eligible_spotify_desktop(device: SpotifyDevice) -> bool:
-    return (
-        bool(device.id)
-        and device.type.casefold() == "computer"
-        and not device.is_restricted
-    )
-
-
-def _spotify_device_if_not_transferring_from_active_device(
-    candidate: SpotifyDevice,
-    devices: Sequence[SpotifyDevice],
-) -> SpotifyDevice | None:
-    if any(device.is_active and device.id != candidate.id for device in devices):
-        return None
-
-    return candidate
+    shell = ctypes.WinDLL("shell32", use_last_error=True)
+    execute = shell.ShellExecuteExW
+    execute.argtypes = [ctypes.POINTER(ShellExecuteInfo)]
+    execute.restype = wintypes.BOOL
+    info = ShellExecuteInfo()
+    info.cbSize = ctypes.sizeof(info)
+    info.fMask = 0x00000400  # SEE_MASK_FLAG_NO_UI
+    info.lpVerb = "open"
+    info.lpFile = "spotify:"
+    info.nShow = 1
+    ole = ctypes.WinDLL("ole32", use_last_error=True)
+    ole.CoInitializeEx.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+    ole.CoInitializeEx.restype = ctypes.c_long
+    initialized = ole.CoInitializeEx(None, 0x6)  # STA + disable obsolete OLE1 DDE
+    if initialized < 0 and initialized != -2147417850:  # existing MTA is valid too
+        raise OSError("Windows application activation is unavailable.")
+    try:
+        if not execute(ctypes.byref(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        if initialized >= 0:
+            ole.CoUninitialize()
 
 
 def _load_default_music_app(settings_store: SettingsStore | None) -> str:

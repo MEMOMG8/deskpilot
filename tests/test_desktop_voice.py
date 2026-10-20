@@ -171,7 +171,7 @@ def test_native_voice_command_uses_existing_voice_pipeline_with_speech() -> None
     assert events == ["cue", "record", "processing"]
 
 
-def test_native_voice_command_can_execute_mocked_media_key_command() -> None:
+def test_native_voice_command_pauses_explicitly(media_controller) -> None:
     wav_audio = encode_wav(b"\x00\x00" * 16000)
     recorder = FakeRecorder(wav_audio)
     launcher = RecordingLauncher()
@@ -182,6 +182,7 @@ def test_native_voice_command_can_execute_mocked_media_key_command() -> None:
         recorder=recorder,
         launcher=launcher,
         key_event_sender=key_event_sender,
+        media_controller=media_controller,
         speech_engine_factory=lambda: engine,
         cue_player=no_op_cue,
     )
@@ -190,14 +191,37 @@ def test_native_voice_command_can_execute_mocked_media_key_command() -> None:
 
     assert response.assistant.intent == "media_control"
     assert response.assistant.status == "executed"
-    assert response.assistant.message == "Toggling media playback."
+    assert response.assistant.message == "Pausing the active Windows player."
     assert response.assistant.speech_result == "completed"
     assert launcher.commands == []
-    assert key_event_sender.events == [
-        (VK_MEDIA_PLAY_PAUSE, 0),
-        (VK_MEDIA_PLAY_PAUSE, KEYEVENTF_KEYUP),
-    ]
-    assert engine.spoken_text == ["Toggling media playback."]
+    assert key_event_sender.events == []
+    assert media_controller.calls == ["pause"]
+    assert engine.spoken_text == ["Pausing the active Windows player."]
+
+
+@pytest.mark.parametrize("phrase", ["open spotify", "play music", "pause music"])
+def test_native_media_failures_keep_specific_tts_and_error_status(phrase, media_controller):
+    from deskpilot_backend.windows_media import MediaControlError, NO_SESSION_MESSAGE
+
+    engine = FakeSpeechEngine()
+    media_controller.error = MediaControlError(NO_SESSION_MESSAGE)
+
+    def unavailable(command):
+        raise OSError("missing protocol")
+
+    service = NativeVoiceCommandService(
+        transcription_service=FakeTranscriptionService(phrase),
+        recorder=FakeRecorder(encode_wav(b"\x00\x00" * 16000)),
+        launcher=unavailable if phrase == "open spotify" else RecordingLauncher(),
+        media_controller=media_controller,
+        speech_engine_factory=lambda: engine,
+        cue_player=no_op_cue,
+    )
+    response = service.run()
+    assert response.assistant.status == "not_supported"
+    assert response.assistant.speech_result == "completed"
+    assert response.assistant.message != NATIVE_UNKNOWN_COMMAND_MESSAGE
+    assert engine.spoken_text == [response.assistant.message]
 
 
 def test_native_voice_command_can_execute_mocked_spotify_command() -> None:
@@ -226,7 +250,7 @@ def test_native_voice_command_can_execute_mocked_spotify_command() -> None:
     assert engine.spoken_text == ["Pausing Spotify."]
 
 
-def test_native_voice_play_music_uses_default_spotify_flow_and_recovers() -> None:
+def test_native_voice_play_music_uses_local_media_and_recovers(media_controller) -> None:
     controller = NativeWakeWordCommandController()
     wav_audio = encode_wav(b"\x00\x00" * 16000)
     recorder = FakeRecorder(wav_audio)
@@ -238,6 +262,7 @@ def test_native_voice_play_music_uses_default_spotify_flow_and_recovers() -> Non
         recorder=recorder,
         launcher=launcher,
         spotify_service=spotify_service,
+        media_controller=media_controller,
         speech_engine_factory=lambda: engine,
         cue_player=no_op_cue,
     )
@@ -249,14 +274,11 @@ def test_native_voice_play_music_uses_default_spotify_flow_and_recovers() -> Non
 
     assert response.assistant.intent == "default_music"
     assert response.assistant.status == "executed"
-    assert response.assistant.message == "Opening Spotify and playing music."
+    assert response.assistant.message == "Playing the active Windows player."
     assert launcher.commands == [["explorer.exe", "spotify:"]]
-    assert spotify_service.calls == [
-        "devices",
-        "devices",
-        "transfer:desktop-after-launch:True",
-    ]
-    assert engine.spoken_text == ["Opening Spotify and playing music."]
+    assert spotify_service.calls == []
+    assert media_controller.calls == ["play"]
+    assert engine.spoken_text == ["Playing the active Windows player."]
     assert controller.finish_command() is True
     assert controller.command_in_progress is False
 
