@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_-]{0,70}$')]
-    [string]$BuildId = ("dp032-test-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+    [string]$BuildId = ("deskpilot-test-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 )
 
 $ErrorActionPreference = "Stop"

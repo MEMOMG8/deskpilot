@@ -45,6 +45,10 @@ The packaged self-test uses temporary profile/cache directories, a working direc
 
 ## Manual Handoff
 
+Follow-up: the maintainer reported successful functional testing on the build
+laptop and on a second laptop before DP-033 began. The second machine's Windows
+version and whether Python was installed were not specified.
+
 1. Quit any running source or old-build DeskPilot instance.
 2. Extract the new ZIP completely. Keep `_internal` next to `DeskPilot.exe`.
 3. Launch the executable from the extracted folder.

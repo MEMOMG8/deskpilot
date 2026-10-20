@@ -6,6 +6,7 @@ DeskPilot is a local-first Windows voice assistant that demonstrates safe native
 
 - Native Windows tray shell with local wake-word activation: "Hey Jarvis"
 - First-run Voice setup: select/test a microphone, prepare local models, and learn the first commands
+- Per-user Windows test installer with a Start menu shortcut and updates that preserve user data ([DP-033](docs/dp-033-installer.md))
 - Push-to-talk browser demo and API endpoints for typed, uploaded-audio, and microphone commands
 - Configurable command transcription: automatic OpenAI `gpt-transcribe` when `OPENAI_API_KEY` is set, or local `faster-whisper` fallback
 - Optional OpenAI natural-language command understanding for unsupported phrasing, with strict function schemas and local allowlist validation

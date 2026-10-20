@@ -50,8 +50,8 @@ def source_fingerprint():
     return digest.hexdigest()
 
 
-def smoke_test(package):
-    report = package.parent / "self-test.json"
+def smoke_test(package, report=None):
+    report = report or package.parent / "self-test.json"
     with tempfile.TemporaryDirectory(prefix="deskpilot-frozen-check-") as directory:
         env = os.environ.copy()
         for name in list(env):

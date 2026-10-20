@@ -2,6 +2,10 @@
 
 This project can be packaged as a local Windows tray application with PyInstaller.
 
+For the per-user Windows installer, use
+[DP-033 build and validation](dp-033-installer.md). The portable ZIP remains
+available for diagnosis and testing.
+
 ## Prerequisites
 
 - Windows 10 or 11

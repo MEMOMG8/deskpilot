@@ -1,0 +1,15 @@
+DeskPilot v0.1 - test installer
+
+This installs DeskPilot for your Windows account. Administrator permissions and
+Python are not required. Close DeskPilot from its tray menu before updating or
+uninstalling it, then open DeskPilot from the Start menu when you are ready.
+
+The first voice setup downloads missing models and lets you test your microphone.
+Installation does not start listening or register startup with Windows.
+Spotify Desktop is installed separately.
+
+Updates preserve your settings, notes and reminders in Documents/DeskPilot.
+Uninstall removes the application and Start menu shortcut. It keeps your personal
+DeskPilot data and downloaded model caches so you can reinstall later.
+
+This test package is unsigned.
