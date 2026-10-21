@@ -8,8 +8,8 @@ DeskPilot is a local-first Windows voice assistant that demonstrates safe native
 - First-run Voice setup: select/test a microphone, prepare local models, and learn the first commands
 - Per-user Windows test installer with a Start menu shortcut and updates that preserve user data ([DP-033](docs/dp-033-installer.md))
 - Push-to-talk browser demo and API endpoints for typed, uploaded-audio, and microphone commands
-- Configurable command transcription: automatic OpenAI `gpt-transcribe` when `OPENAI_API_KEY` is set, or local `faster-whisper` fallback
-- Optional OpenAI natural-language command understanding for unsupported phrasing, with strict function schemas and local allowlist validation
+- Local, Cloud and Automatic processing modes; cloud requires explicit consent and a configured API key
+- Offline English/Spanish media phrase classification, with optional OpenAI interpretation and local allowlist validation ([DP-034](docs/dp-034-hybrid-phrases.md))
 - Local Spotify Desktop launch and explicit play/pause/track controls through Windows media sessions, without Spotify API credentials
 - Experimental Spotify Web API connection retained separately using Authorization Code with PKCE
 - Local Windows SAPI text-to-speech through `pyttsx3`
@@ -22,7 +22,7 @@ DeskPilot is a local-first Windows voice assistant that demonstrates safe native
 
 DeskPilot is designed to keep actions, storage, wake-word detection, text-to-speech, notes, reminders, and settings local. Audio is captured only after an explicit button press or enabled local wake-word detection.
 
-Native wake-word commands can optionally use OpenAI `gpt-transcribe` for the already-recorded short command WAV. DeskPilot can also optionally use OpenAI Responses function calling to interpret natural English phrasing only after the deterministic router does not recognize a command. DeskPilot never streams continuous microphone audio, does not send notes/reminders/settings/history/file contents as context, and does not write or retain command recordings or cloud requests.
+Native wake-word commands can optionally use OpenAI `gpt-transcribe` for the already-recorded short command WAV. DeskPilot can also optionally use OpenAI Responses function calling to interpret English/Spanish phrasing only after the deterministic router does not recognize a command. DeskPilot never streams continuous microphone audio, does not send notes/reminders/settings/history/file contents as context, and does not retain recordings or cloud requests; temporary transcription WAV files are removed after processing.
 
 Cloud interpretation never executes actions. It may only propose a strict typed outcome, and local DeskPilot code validates that outcome through the existing command router and allowlisted executor. If OpenAI transcription or interpretation is unavailable, DeskPilot falls back to local behavior when possible.
 
@@ -60,7 +60,7 @@ DeskPilot starts in the Windows system tray and opens **Voice setup** until setu
 
 1. Choose a microphone and click **Test microphone · 3 seconds**. Speak normally while watching the input level. This local test does not save or transcribe audio.
 2. Click **Prepare voice models**. The window shows the wake-word and local-transcription preparation stages; missing files download in the background. Retry if preparation fails.
-3. Leave **Use local transcription and command matching (no cloud)** checked for local operation. Unchecked preserves your existing provider settings.
+3. Choose **Local · offline** and your spoken language. Cloud or Automatic require the explicit cloud-consent checkbox and your configured `OPENAI_API_KEY`.
 4. Click **Save setup**, then choose **Start wake word listening** in the tray. Say **Hey Jarvis**, wait for the cue, then say **open calculator**.
 
 Saving does not start listening. **Later** leaves setup incomplete; the next launch or Start request reopens it. Opening setup pauses listening. Use the tray menu to start or stop listening, show/hide the overlay, or quit.
@@ -84,7 +84,7 @@ Native voice states:
 - Green: completed successfully, then hides
 - Red: recoverable error or unknown command, then hides
 
-Voice setup prepares openWakeWord's local `hey_jarvis` model and the `tiny.en` local transcription model before the first command. Already-cached files are reused. openWakeWord code is Apache-2.0 licensed, while its included pre-trained models are licensed CC BY-NC-SA 4.0.
+Voice setup prepares openWakeWord's local `hey_jarvis` model and the multilingual `tiny` local transcription model before the first command. Already-cached files are reused. openWakeWord code is Apache-2.0 licensed, while its included pre-trained models are licensed CC BY-NC-SA 4.0.
 
 For stronger native command transcription, set `OPENAI_API_KEY` before starting the tray app:
 
@@ -93,7 +93,7 @@ $env:OPENAI_API_KEY = "your_api_key_here"
 python -m deskpilot_backend.desktop
 ```
 
-Do not commit API keys. With the default `auto` providers, DeskPilot uses OpenAI only when this environment variable exists; otherwise it preserves local transcription and deterministic command routing. OpenAI usage may incur API cost.
+Do not commit API keys. The default mode is **Local**, even when a key exists. To opt in, choose Cloud or Automatic in Voice setup and explicitly allow sending command audio/text. OpenAI usage may incur API cost.
 
 ## Spotify Desktop Setup
 
@@ -147,6 +147,7 @@ python -m compileall src tests
 - [DP-030 validation and release follow-up](docs/dp-030-validation.md)
 - [DP-031 voice setup](docs/dp-031-voice-setup.md)
 - [DP-032 Windows test distribution](docs/dp-032-windows-build.md)
+- [DP-034 Local, Cloud and Automatic phrases](docs/dp-034-hybrid-phrases.md)
 - [Security](SECURITY.md)
 
 ## Local Settings
@@ -159,8 +160,10 @@ DeskPilot stores local preferences in `~/Documents/DeskPilot/settings.json`. The
   "command_capture_duration_seconds": 4,
   "recording_start_cue_enabled": true,
   "wake_listening_on_startup": false,
-  "voice_transcription_provider": "auto",
-  "voice_command_interpreter_provider": "auto",
+  "voice_transcription_provider": "local",
+  "voice_command_interpreter_provider": "local",
+  "cloud_processing_allowed": false,
+  "voice_language": "en",
   "default_music_app": "spotify",
   "microphone_device": null,
   "voice_setup_completed": false,
@@ -172,17 +175,17 @@ DeskPilot stores local preferences in `~/Documents/DeskPilot/settings.json`. The
 
 `voice_transcription_provider` controls only native wake-word command transcription:
 
-- `auto`: use OpenAI `gpt-transcribe` when `OPENAI_API_KEY` exists, otherwise use local `faster-whisper`
+- `auto`: try local transcription first; try cloud only on local failure or empty text, with consent and a key
 - `local`: always use local `faster-whisper`
-- `openai`: prefer OpenAI and fall back locally if cloud transcription is unavailable
+- `openai`: prefer OpenAI with consent and a key; fall back locally if unavailable
 
-Invalid provider values use `auto`.
+Invalid provider values use `local`. `cloud_processing_allowed` defaults to `false`, including in older settings. A key alone never grants permission. `voice_language` accepts `en`, `es`, or `auto`; short phrases work best with a specific language.
 
 `voice_command_interpreter_provider` controls natural-language command understanding after deterministic routing fails:
 
-- `auto`: use OpenAI Responses function calling when `OPENAI_API_KEY` exists, otherwise deterministic-only behavior
-- `local`: deterministic-only behavior
-- `openai`: prefer OpenAI interpretation and show a recoverable message if no key is configured
+- `auto`: use local phrase classification first; try cloud for unknown phrases only, with consent and a key. Local clarifications remain local
+- `local`: offline example-based media phrase classification after exact routing fails
+- `openai`: prefer OpenAI interpretation with consent and a key; fall back to the local classifier on failure or unknown
 
 The interpreter uses `store=false`, strict function schemas, no OpenAI built-in tools, and one tool call. Returned tool arguments are validated locally before any action can run.
 
@@ -190,7 +193,7 @@ The interpreter uses `store=false`, strict function schemas, no OpenAI built-in 
 
 `microphone_device` is `null` for the system default, or an object with the selected device's `name` and `hostapi`. Native wake-word listening and command capture resolve that identity each time they open a stream, so a changed numeric device index does not select a different microphone. If a selected device disappears, reopen **Voice setup** and refresh. The development API microphone endpoint continues to use its default input.
 
-`voice_setup_completed` is set only by saving setup after a successful audio-signal test and model preparation. Older settings remain readable and show setup once. Saving updates the setup fields, and optionally the two provider settings when local mode is checked; it preserves aliases and other fields. Malformed or unsupported settings files are not overwritten.
+`voice_setup_completed` is set only by saving setup after a successful audio-signal test and model preparation. Older settings remain readable and show setup once. Saving updates microphone, mode, consent and language; it preserves aliases and other fields. Selecting Local revokes cloud consent. Malformed or unsupported settings files are not overwritten.
 
 Custom aliases map one fixed phrase to an existing fixed command ID:
 

@@ -106,23 +106,23 @@ User-created data is not bundled into the application. DeskPilot keeps settings,
 
 If the experimental connector is explicitly connected, its Spotify token is stored under this user-data area as a Windows DPAPI-protected file for the current user. Public media controls do not require that file. The build does not bundle Spotify tokens, OAuth callback data, settings, notes, reminders, audio recordings, or local model caches.
 
-On first launch, **Voice setup** lets the user select/test a microphone and prepare the local openWakeWord `hey_jarvis` and faster-whisper `tiny.en` models. Missing files download in the background with stage/status feedback. Both local models are prepared even if optional cloud providers are retained, so local fallback is available. These model caches are local machine state and are intentionally not committed or bundled from a developer workstation. After saving setup, start listening explicitly from the tray.
+On first launch, **Voice setup** lets the user select/test a microphone and prepare the local openWakeWord `hey_jarvis` and faster-whisper multilingual `tiny` models. Missing files download in the background with stage/status feedback. Both local models are prepared even if optional cloud providers are retained, so local fallback is available. These model caches are local machine state and are intentionally not committed or bundled from a developer workstation. After saving setup, start listening explicitly from the tray.
 
 Wake-word ONNX files are downloaded from fixed upstream release URLs into `%LOCALAPPDATA%\DeskPilot\models\openwakeword`. The app passes explicit paths for the wake, spectrogram, and embedding models; it never writes models into the installation directory. Downloads use a timeout and temporary files, and interrupted transfers are not promoted into the cache. Local transcription uses the normal Hugging Face user cache. Old wake files in a developer `.venv` are not copied into the package.
 
 Native voice command transcription uses the local `voice_transcription_provider` setting:
 
-- `auto`: use OpenAI `gpt-transcribe` when `OPENAI_API_KEY` exists, otherwise use local `faster-whisper`
+- `auto`: try local transcription first; try cloud only on local failure or empty text, with consent and a key
 - `local`: always use local `faster-whisper`
-- `openai`: prefer OpenAI and fall back locally if cloud transcription is unavailable
+- `openai`: prefer OpenAI with consent and a key; fall back locally if unavailable
 
-DeskPilot sends only the already-recorded bounded command WAV after wake-word activation. It does not stream continuous microphone audio, does not attach notes/reminders/settings as context, and does not write or retain recordings.
+DeskPilot sends only the already-recorded bounded command WAV after wake-word activation. It does not stream continuous microphone audio, does not attach notes/reminders/settings as context, and does not retain recordings; temporary transcription WAV files are removed after processing.
 
 Natural-language command understanding uses the local `voice_command_interpreter_provider` setting:
 
-- `auto`: use OpenAI Responses function calling when `OPENAI_API_KEY` exists, otherwise deterministic-only behavior
-- `local`: deterministic-only behavior
-- `openai`: prefer OpenAI interpretation and show a recoverable message if no key is configured
+- `auto`: use local phrase classification first; try cloud for unknown phrases only, with consent and a key. Local clarifications remain local
+- `local`: offline example-based media phrase classification after exact routing fails
+- `openai`: prefer OpenAI interpretation with consent and a key; fall back to the local classifier on failure or unknown
 
 The interpreter sends only the current transcript and static allowed-command metadata, uses `store=false`, and does not use OpenAI built-in tools.
 
@@ -150,7 +150,7 @@ It does not bundle secrets, notes, reminders, settings, audio recordings, or loc
 - If media controls report no active Windows session, open a player, start a song once, and retry. Do not use `connect spotify` to resolve this local session error.
 - If Windows media support is missing, reinstall project dependencies in `.venv` and rebuild before testing a packaged artifact.
 - If the experimental `connect spotify` command fails, check its Client ID and exact redirect URI `http://127.0.0.1:8765/callback`. Those requirements apply only to the experimental API path.
-- If local transcription fails on first use, confirm the machine can download/cache the `tiny.en` model or that the model is already available in the local Hugging Face cache.
+- If local transcription fails on first use, confirm the machine can download/cache the multilingual `tiny` model or that the model is already available in the local Hugging Face cache.
 - If audio capture fails, check Windows microphone privacy permissions and the default recording device.
 - Use **Voice setup → Refresh** to select and test a reconnected or replacement microphone. Changing a selection requires another test before saving.
 - If local TTS fails, verify Windows SAPI voices are available on the machine.
@@ -166,3 +166,7 @@ Copy the ZIP to a Windows x64 machine/VM without Python or this repository. Extr
 - Verify no developer credentials, settings, or cached models are needed.
 
 Record Windows version, architecture, package build ID, and results before moving on to an installer.
+
+## Processing Consent (DP-034)
+
+Local is the default. Both cloud providers require `cloud_processing_allowed=true` and `OPENAI_API_KEY`. Voice setup explains the upload and potential usage charges before opt-in. Old settings and a pre-existing key do not grant consent. Selecting Local revokes permission. See [DP-034](dp-034-hybrid-phrases.md) for mode semantics, language support and validation limitations.

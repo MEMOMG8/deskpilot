@@ -1,4 +1,3 @@
-import os
 from collections.abc import Mapping
 
 from deskpilot_backend.actions import (
@@ -11,10 +10,11 @@ from deskpilot_backend.actions import (
 from deskpilot_backend.command_interpreter import (
     ClarificationStore,
     CommandInterpreter,
-    CommandInterpreterError,
     InterpreterProvider,
 )
 from deskpilot_backend.commands import CommandValidationError, route_command
+from deskpilot_backend.intent_routing import HybridCommandInterpreter
+from deskpilot_backend.command_interpreter import fixed_command_ids
 from deskpilot_backend.models import (
     ActionExecutionRequest,
     AssistantCommandRequest,
@@ -42,6 +42,7 @@ def handle_assistant_command(
     custom_aliases: Mapping[str, str] | None = None,
     command_interpreter: CommandInterpreter | None = None,
     command_interpreter_provider: InterpreterProvider | None = None,
+    cloud_processing_allowed: bool | None = None,
     clarification_store: ClarificationStore | None = None,
     on_recoverable_error: object | None = None,
     media_controller: MediaController | None = None,
@@ -69,6 +70,10 @@ def handle_assistant_command(
             command_interpreter_provider=_resolve_interpreter_provider(
                 settings_store,
                 command_interpreter_provider,
+            ),
+            cloud_processing_allowed=(
+                _load_settings_for_interpreter(settings_store).cloud_processing_allowed
+                if cloud_processing_allowed is None else cloud_processing_allowed is True
             ),
             clarification_store=clarification_store,
             on_recoverable_error=on_recoverable_error,
@@ -178,41 +183,37 @@ def _try_interpret_unknown_command(
     *,
     command_interpreter: CommandInterpreter | None,
     command_interpreter_provider: InterpreterProvider,
+    cloud_processing_allowed: bool,
     clarification_store: ClarificationStore | None,
     on_recoverable_error: object | None,
     custom_aliases: Mapping[str, str] | None,
 ) -> CommandResponse | AssistantCommandResponse | None:
-    if command_interpreter_provider == "local" or command_interpreter is None:
-        return None
-
-    if not _openai_api_key_available():
-        if command_interpreter_provider == "openai":
-            _notify_recoverable(
-                on_recoverable_error,
-                "Natural-language command understanding needs OPENAI_API_KEY.",
-            )
-            return AssistantCommandResponse(
-                intent="unknown",
-                status="not_supported",
-                requires_confirmation=False,
-                message="Natural-language command understanding needs OPENAI_API_KEY.",
-            )
-        return None
-
-    try:
-        interpretation = command_interpreter.interpret(command.text)
-    except CommandInterpreterError:
-        _notify_recoverable(
-            on_recoverable_error,
-            "Natural-language command understanding is unavailable.",
-        )
-        return None
+    errors = []
+    def notify(message):
+        errors.append(message)
+        _notify_recoverable(on_recoverable_error, message)
+    interpretation = HybridCommandInterpreter(
+        provider=command_interpreter_provider, cloud_allowed=cloud_processing_allowed,
+        cloud=command_interpreter, on_error=notify,
+    ).interpret(command.text)
 
     if interpretation.unknown:
+        if errors:
+            return AssistantCommandResponse(
+                intent="unknown", status="not_supported", requires_confirmation=False,
+                message=errors[-1],
+            )
         return None
 
     if interpretation.clarification_question:
-        if clarification_store is None or not interpretation.clarification_candidates:
+        candidates = interpretation.clarification_candidates
+        if (
+            clarification_store is None or len(candidates) not in {1, 2}
+            or len(set(candidates)) != len(candidates)
+            or any(c not in fixed_command_ids() for c in candidates)
+            or len(interpretation.clarification_question) > 400
+            or interpretation.command_text is not None
+        ):
             return None
         clarification_store.set(interpretation.clarification_candidates)
         return AssistantCommandResponse(
@@ -273,11 +274,6 @@ def _resolve_pending_clarification(
 
 def _is_unknown(routed_command: CommandResponse) -> bool:
     return routed_command.intent == "unknown" and routed_command.status == "not_supported"
-
-
-def _openai_api_key_available() -> bool:
-    api_key = os.getenv("OPENAI_API_KEY")
-    return isinstance(api_key, str) and bool(api_key.strip())
 
 
 def _notify_recoverable(callback: object | None, message: str) -> None:

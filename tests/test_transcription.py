@@ -1,5 +1,6 @@
 import io
 import os
+import pytest
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -226,11 +227,12 @@ def test_transcription_endpoint_returns_controlled_service_failure() -> None:
     assert response.json() == {"detail": "Local transcription is unavailable."}
 
 
-def test_provider_auto_uses_openai_when_api_key_exists() -> None:
+def test_provider_auto_uses_local_first_even_with_key_and_consent() -> None:
     local = FakeTranscriptionService("local text")
     cloud = FakeTranscriptionService("cloud text")
     service = ProviderTranscriptionService(
         provider="auto",
+        cloud_allowed=True,
         local_service=local,
         openai_service=cloud,
         api_key_getter=lambda name: "test-key",
@@ -242,9 +244,9 @@ def test_provider_auto_uses_openai_when_api_key_exists() -> None:
         filename="command.wav",
     )
 
-    assert response.text == "cloud text"
-    assert cloud.calls
-    assert local.calls == []
+    assert response.text == "local text"
+    assert cloud.calls == []
+    assert local.calls
 
 
 def test_provider_auto_uses_local_when_api_key_is_missing() -> None:
@@ -274,6 +276,7 @@ def test_provider_openai_missing_api_key_falls_back_to_local() -> None:
     cloud = FakeTranscriptionService("cloud text")
     service = ProviderTranscriptionService(
         provider="openai",
+        cloud_allowed=True,
         local_service=local,
         openai_service=cloud,
         api_key_getter=lambda name: " ",
@@ -299,7 +302,8 @@ def test_provider_cloud_failure_falls_back_to_local() -> None:
     local = FakeTranscriptionService("local text")
     cloud = FailingTranscriptionService("cloud text")
     service = ProviderTranscriptionService(
-        provider="auto",
+        provider="openai",
+        cloud_allowed=True,
         local_service=local,
         openai_service=cloud,
         api_key_getter=lambda name: "test-key",
@@ -365,3 +369,63 @@ def test_openai_transcription_service_removes_temp_file_on_failure() -> None:
 
     assert fake_transcriptions.file_path is not None
     assert not os.path.exists(fake_transcriptions.file_path)
+
+
+@pytest.mark.parametrize("mode", ["local", "auto", "openai"])
+def test_transcription_never_uploads_without_explicit_consent(mode):
+    local, cloud = FakeTranscriptionService("local"), FakeTranscriptionService("cloud")
+    service = ProviderTranscriptionService(
+        provider=mode, local_service=local, openai_service=cloud,
+        api_key_getter=lambda _: "test-key",
+    )
+    assert service.transcribe(b"audio", content_type="audio/wav").text == "local"
+    assert not cloud.calls
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_auto_transcription_uses_cloud_only_after_empty_or_failed_local(failure):
+    local = FailingTranscriptionService() if failure else FakeTranscriptionService("")
+    cloud = FakeTranscriptionService("cloud")
+    service = ProviderTranscriptionService(
+        provider="auto", cloud_allowed=True, local_service=local,
+        openai_service=cloud, api_key_getter=lambda _: "test-key",
+    )
+    assert service.transcribe(b"audio", content_type="audio/wav").text == "cloud"
+    assert len(local.calls) == len(cloud.calls) == 1
+
+
+def test_cloud_transcription_has_precedence_and_consent_can_be_revoked():
+    local, cloud = FakeTranscriptionService("local"), FakeTranscriptionService("cloud")
+    service = ProviderTranscriptionService(
+        provider="openai", cloud_allowed=True, local_service=local,
+        openai_service=cloud, api_key_getter=lambda _: "test-key",
+    )
+    assert service.transcribe(b"audio", content_type="audio/wav").text == "cloud"
+    assert not local.calls
+    service.configure(language="es", cloud_allowed=False)
+    assert service.transcribe(b"audio", content_type="audio/wav").text == "local"
+    assert len(cloud.calls) == 1
+
+
+@pytest.mark.parametrize("language", ["en", "es", "auto"])
+def test_language_hint_reaches_both_speech_engines(language):
+    from types import SimpleNamespace
+    from deskpilot_backend.transcription import WhisperTranscriptionService
+    calls = []
+    def transcribe(path, **kwargs):
+        calls.append(kwargs)
+        return [SimpleNamespace(text="pausa la canción")], SimpleNamespace(language="es")
+    local = WhisperTranscriptionService()
+    local._model = SimpleNamespace(transcribe=transcribe)
+    fake = FakeOpenAITranscriptions(FakeTranscript("pausa la canción", "es"))
+    cloud = OpenAITranscriptionService(
+        api_key_getter=lambda _: "test-key", client_factory=lambda _: FakeOpenAIClient(fake),
+    )
+    ProviderTranscriptionService(local_service=local, openai_service=cloud, language=language)
+    local.transcribe(b"audio", content_type="audio/wav")
+    cloud.transcribe(b"audio", content_type="audio/wav")
+    assert calls == [{"language": None if language == "auto" else language}]
+    if language == "auto":
+        assert "language" not in fake.calls[0]
+    else:
+        assert fake.calls[0]["language"] == language

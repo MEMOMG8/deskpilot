@@ -9,7 +9,7 @@ flowchart LR
     C --> D[Transcription\nlocal faster-whisper or optional OpenAI gpt-transcribe]
     D --> E[Deterministic router\ncommands.py]
     E -->|recognized| G[Allowlisted executor\nactions.py]
-    E -->|unknown only| F[Optional OpenAI interpreter\nResponses function calling store=false]
+    E -->|unknown only| F[Hybrid interpretation\nlocal EN/ES classifier or consented OpenAI]
     F -->|validated local command| E
     F -->|clarify or unknown| H[Local response]
     G --> I[Local TTS\npyttsx3 / SAPI]
@@ -38,7 +38,7 @@ The overlay is visual feedback only:
 
 `commands.py` normalizes case, whitespace, and terminal punctuation, then maps exact English phrases to typed command responses. Parameterized commands exist only where explicitly implemented, such as bounded search, notes, and reminders.
 
-The deterministic router is always the first path. If it returns unknown, the optional command interpreter may use the OpenAI Responses API with model `gpt-6-luna`, function calling, strict schemas, `store=false`, `parallel_tool_calls=false`, and exactly one accepted tool call. It sends only the current transcript plus static allowed-command metadata. It does not send notes, reminders, settings, history, file contents, or local paths.
+The deterministic router is always the first path and built-ins take precedence over aliases. If it returns unknown, `intent_routing.py` selects local, cloud or automatic interpretation. The offline `local_interpreter.py` compares word/character TF-IDF vectors against reviewed EN/ES media examples, abstains on unsupported targets and negations, and asks for clarification at intermediate similarity. This is a lexical statistical classifier, not a conversational LLM; similarity is not a probability. Automatic uses local first; Cloud uses cloud first with local fallback. Both require explicit `cloud_processing_allowed=true` plus a key before any cloud request. Cloud interpretation may use the OpenAI Responses API with model `gpt-6-luna`, function calling, strict schemas, `store=false`, `parallel_tool_calls=false`, and exactly one accepted tool call. It sends only the current transcript plus static allowed-command metadata. It does not send notes, reminders, settings, history, file contents, or local paths.
 
 The interpreter cannot execute anything. It may propose one existing fixed command ID, a note/reminder/search payload, a short clarification with up to two fixed-command choices, or unknown. Local code validates the result by routing it back through `commands.py` and executing only through `actions.py`.
 
@@ -82,4 +82,4 @@ Spotify refresh tokens are stored under `~/Documents/DeskPilot` encrypted with W
 
 ## Safety Boundaries
 
-DeskPilot is English-only and local-first. Optional OpenAI transcription and command interpretation are explicitly configured by environment/settings and may incur API cost. Public Spotify Desktop/media control needs no Spotify API connection. Only the experimental Spotify Web API integration requires explicit connection and uses no client secret. DeskPilot does not execute arbitrary commands, accept arbitrary paths or URLs, run shell commands, automate desktop UI clicks, call OpenAI built-in tools, or listen continuously for full speech transcription. Wake-word detection only triggers a short bounded command capture.
+DeskPilot is local-first. Media phrase understanding supports English and Spanish; the wake word, other exact commands and responses remain in English. Optional OpenAI transcription and command interpretation are explicitly configured by environment/settings and may incur API cost. Public Spotify Desktop/media control needs no Spotify API connection. Only the experimental Spotify Web API integration requires explicit connection and uses no client secret. DeskPilot does not execute arbitrary commands, accept arbitrary paths or URLs, run shell commands, automate desktop UI clicks, call OpenAI built-in tools, or listen continuously for full speech transcription. Wake-word detection only triggers a short bounded command capture.

@@ -1103,6 +1103,7 @@ def test_exact_command_bypasses_cloud_interpreter(monkeypatch) -> None:
         launcher=launcher,
         command_interpreter=interpreter,
         command_interpreter_provider="openai",
+        cloud_processing_allowed=True,
     )
 
     assert response.message == "Opening Calculator."
@@ -1124,6 +1125,7 @@ def test_natural_language_fixed_command_executes_through_local_allowlist(
         launcher=launcher,
         command_interpreter=interpreter,
         command_interpreter_provider="openai",
+        cloud_processing_allowed=True,
     )
 
     assert response.intent == "open_app"
@@ -1152,6 +1154,7 @@ def test_natural_language_note_reminder_and_search_use_existing_validation(
             CommandInterpretation(command_text="note Buy milk")
         ),
         command_interpreter_provider="openai",
+        cloud_processing_allowed=True,
     )
     reminder_response = handle_assistant_command(
         AssistantCommandRequest(text="Remind me to stretch soon"),
@@ -1160,6 +1163,7 @@ def test_natural_language_note_reminder_and_search_use_existing_validation(
             CommandInterpretation(command_text="remind me in 5 minutes to Stretch")
         ),
         command_interpreter_provider="openai",
+        cloud_processing_allowed=True,
     )
     search_response = handle_assistant_command(
         AssistantCommandRequest(text="Find FastAPI examples on GitHub"),
@@ -1168,6 +1172,7 @@ def test_natural_language_note_reminder_and_search_use_existing_validation(
             CommandInterpretation(command_text="search github for fastapi examples")
         ),
         command_interpreter_provider="openai",
+        cloud_processing_allowed=True,
     )
 
     assert note_response.message == "Note saved."
@@ -1192,6 +1197,7 @@ def test_invalid_interpreted_payload_falls_back_to_unknown(monkeypatch) -> None:
             CommandInterpretation(command_text="note \x01")
         ),
         command_interpreter_provider="openai",
+        cloud_processing_allowed=True,
     )
 
     assert response.intent == "unknown"
@@ -1207,6 +1213,7 @@ def test_unknown_openai_failure_missing_key_and_local_only_modes(monkeypatch) ->
         AssistantCommandRequest(text="Please do something unsupported"),
         command_interpreter=failing,
         command_interpreter_provider="openai",
+        cloud_processing_allowed=True,
     )
     assert failure_response.intent == "unknown"
     assert failing.calls == ["Please do something unsupported"]
@@ -1219,6 +1226,7 @@ def test_unknown_openai_failure_missing_key_and_local_only_modes(monkeypatch) ->
             CommandInterpretation(command_text="open notepad")
         ),
         command_interpreter_provider="openai",
+        cloud_processing_allowed=True,
         on_recoverable_error=missing_key_messages.append,
     )
     assert missing_key_response.message == (
@@ -1255,6 +1263,7 @@ def test_assistant_clarification_question_and_replies(monkeypatch) -> None:
         AssistantCommandRequest(text="Open the app"),
         command_interpreter=interpreter,
         command_interpreter_provider="openai",
+        cloud_processing_allowed=True,
         clarification_store=store,
     )
     first = handle_assistant_command(

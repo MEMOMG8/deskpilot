@@ -85,12 +85,23 @@ def run_checks(report_path: Path) -> int:
             "onnx_providers": onnxruntime.get_available_providers(),
         }
 
+    def local_phrases():
+        from deskpilot_backend.local_interpreter import LocalMediaInterpreter
+        interpreter = LocalMediaInterpreter()
+        for phrase in ("pause the song", "pausa la canción"):
+            if interpreter.interpret(phrase).command_text != "pause music":
+                raise RuntimeError("Local media interpretation failed")
+        if not interpreter.interpret("no pauses la música").unknown:
+            raise RuntimeError("Negated phrase was accepted")
+        return {"languages": ["en", "es"], "network": False, "command_sent": False}
+
     check("bundled_imports", imports)
     check("qt_setup", ui)
     check("audio_devices", audio)
     check("sapi_tts", tts)
     check("windows_media", media)
     check("inference_engines", inference)
+    check("local_media_phrases", local_phrases)
     ok = all(result["ok"] for result in checks.values())
     report_path.write_text(
         json.dumps({"ok": ok, "frozen": frozen, "checks": checks}, indent=2) + "\n",

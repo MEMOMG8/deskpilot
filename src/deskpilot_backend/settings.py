@@ -62,6 +62,8 @@ class DeskPilotSettings:
     custom_aliases: dict[str, str] = field(default_factory=dict)
     microphone_device: dict[str, str] | None = None
     voice_setup_completed: bool = False
+    cloud_processing_allowed: bool = False
+    voice_language: str = "en"
     warnings: tuple[str, ...] = ()
 
 
@@ -115,6 +117,8 @@ def default_settings_data() -> dict[str, Any]:
         "custom_aliases": {},
         "microphone_device": None,
         "voice_setup_completed": False,
+        "cloud_processing_allowed": False,
+        "voice_language": "en",
     }
 
 
@@ -143,13 +147,20 @@ class SettingsStore:
         return self.settings_file
 
     def save_voice_setup(
-        self, microphone_device: dict[str, str] | None, *, use_local: bool
+        self, microphone_device: dict[str, str] | None, *, use_local: bool = False,
+        mode: str | None = None, cloud_allowed: bool = False, language: str | None = None,
     ) -> DeskPilotSettings:
         """Update only setup-owned fields, preserving existing user preferences."""
         warnings: list[str] = []
         selected = _parse_microphone_device(microphone_device, warnings)
         if warnings:
             raise SettingsStoreError("Choose a valid microphone before saving.")
+        if mode is not None and (not isinstance(mode, str) or mode not in ALLOWED_COMMAND_INTERPRETER_PROVIDERS):
+            raise SettingsStoreError("Choose Local, Cloud, or Automatic.")
+        if mode in {"auto", "openai"} and cloud_allowed is not True:
+            raise SettingsStoreError("Allow cloud processing explicitly, or choose Local.")
+        if language is not None and (not isinstance(language, str) or language not in {"en", "es", "auto"}):
+            raise SettingsStoreError("Choose English, Spanish, or automatic language detection.")
         temp_path: str | None = None
         try:
             self.settings_file.parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +174,15 @@ class SettingsStore:
                 raw = default_settings_data()
             raw.update(microphone_device=selected, voice_setup_completed=True)
             if use_local:
-                raw.update(voice_transcription_provider="local", voice_command_interpreter_provider="local")
+                raw.update(voice_transcription_provider="local", voice_command_interpreter_provider="local",
+                           cloud_processing_allowed=False)
+            if mode is not None:
+                raw.update(
+                    voice_transcription_provider=mode, voice_command_interpreter_provider=mode,
+                    cloud_processing_allowed=cloud_allowed is True and mode != "local",
+                )
+            if language is not None:
+                raw["voice_language"] = language
             # Write beside the destination, then replace atomically. Invalid JSON
             # is never silently replaced with defaults by this explicit save.
             with tempfile.NamedTemporaryFile(
@@ -255,6 +274,14 @@ def parse_settings(raw_settings: object) -> DeskPilotSettings:
         setting_name="voice_setup_completed",
         warnings=warnings,
     )
+    cloud_processing_allowed = _parse_bool_setting(
+        raw_settings.get("cloud_processing_allowed", False), default=False,
+        setting_name="cloud_processing_allowed", warnings=warnings,
+    )
+    voice_language = raw_settings.get("voice_language", "en")
+    if not isinstance(voice_language, str) or voice_language not in {"en", "es", "auto"}:
+        warnings.append("Invalid voice language; using English.")
+        voice_language = "en"
 
     return DeskPilotSettings(
         command_capture_duration_seconds=command_capture_duration_seconds,
@@ -266,6 +293,8 @@ def parse_settings(raw_settings: object) -> DeskPilotSettings:
         custom_aliases=custom_aliases,
         microphone_device=microphone_device,
         voice_setup_completed=voice_setup_completed,
+        cloud_processing_allowed=cloud_processing_allowed,
+        voice_language=voice_language,
         warnings=tuple(warnings),
     )
 
@@ -374,7 +403,7 @@ def _parse_transcription_provider(
     if isinstance(raw_value, str) and raw_value in ALLOWED_TRANSCRIPTION_PROVIDERS:
         return raw_value
 
-    warnings.append("Invalid voice transcription provider; using auto.")
+    warnings.append("Invalid voice transcription provider; using local.")
     return DEFAULT_TRANSCRIPTION_PROVIDER
 
 
@@ -385,7 +414,7 @@ def _parse_command_interpreter_provider(
     if isinstance(raw_value, str) and raw_value in ALLOWED_COMMAND_INTERPRETER_PROVIDERS:
         return raw_value
 
-    warnings.append("Invalid voice command interpreter provider; using auto.")
+    warnings.append("Invalid voice command interpreter provider; using local.")
     return DEFAULT_COMMAND_INTERPRETER_PROVIDER
 
 

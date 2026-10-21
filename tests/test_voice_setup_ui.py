@@ -158,9 +158,28 @@ def test_save_failure_keeps_dialog_open_and_original_file(app, dialog):
 def test_existing_cloud_preference_is_not_silently_changed(app, tmp_path):
     dialog = VoiceSetupDialog(
         SettingsStore(tmp_path / "settings.json"),
-        DeskPilotSettings(voice_transcription_provider="openai"),
+        DeskPilotSettings(voice_transcription_provider="openai", voice_command_interpreter_provider="openai"),
         VoiceModelResources(),
     )
-    assert not dialog.local_mode.isChecked()
+    assert dialog.mode.currentData() == "openai"
+    assert not dialog.cloud_consent.isChecked()
     dialog.deleteLater()
     app.processEvents()
+
+
+def test_cloud_mode_requires_consent_and_saves_language(app, dialog):
+    dialog.test_microphone()
+    settle(app, dialog)
+    dialog.prepare_models()
+    settle(app, dialog)
+    dialog.mode.setCurrentIndex(dialog.mode.findData("auto"))
+    dialog.language.setCurrentIndex(dialog.language.findData("es"))
+    dialog.save_setup()
+    assert not dialog.store.settings_file.exists()
+    assert "explicitly" in dialog.status.text()
+    dialog.cloud_consent.setChecked(True)
+    dialog.save_setup()
+    settings = dialog.store.load_or_create()
+    assert settings.cloud_processing_allowed
+    assert settings.voice_language == "es"
+    assert settings.voice_transcription_provider == settings.voice_command_interpreter_provider == "auto"

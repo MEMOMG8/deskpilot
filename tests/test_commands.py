@@ -644,3 +644,11 @@ def test_commands_endpoint_rejects_blank_text() -> None:
 def test_open_spotify_is_exact_not_an_arbitrary_launch():
     for phrase in ("open spotify please", "open spotify.exe", "open spotify https://example.com"):
         assert route_command(phrase).status == "not_supported"
+
+
+@pytest.mark.parametrize("phrase", [
+    "connect spotify", "pause spotify", "open spotify", "pause music", "play music",
+    "open calculator", "help", "cancel", "note remember the milk",
+])
+def test_direct_alias_cannot_replace_a_builtin(phrase):
+    assert route_command(phrase) == route_command(phrase, custom_aliases={phrase: "open notepad"})

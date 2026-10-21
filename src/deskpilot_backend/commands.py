@@ -182,12 +182,6 @@ def route_command(
     custom_aliases: Mapping[str, str] | None = None,
 ) -> CommandResponse:
     normalized_text = normalize_command_text(text)
-    if custom_aliases and normalized_text in custom_aliases:
-        return route_command(
-            custom_aliases[normalized_text],
-            now_factory=now_factory,
-        )
-
     note_response = _route_note_command(text)
     if note_response is not None:
         return note_response
@@ -347,6 +341,11 @@ def route_command(
             requires_confirmation=False,
             message=HELP_MESSAGE,
         )
+
+    # Built-in and parameterized commands always win, even for callers that
+    # supply aliases directly rather than loading validated settings.
+    if custom_aliases and normalized_text in custom_aliases:
+        return route_command(custom_aliases[normalized_text], now_factory=now_factory)
 
     return CommandResponse(
         intent="unknown",

@@ -6,8 +6,8 @@ from typing import Protocol
 
 from deskpilot_backend.models import TranscriptionResponse
 
-DEFAULT_WHISPER_MODEL = "tiny.en"
-DEFAULT_TRANSCRIPTION_PROVIDER = "auto"
+DEFAULT_WHISPER_MODEL = "tiny"
+DEFAULT_TRANSCRIPTION_PROVIDER = "local"
 OPENAI_TRANSCRIPTION_MODEL = "gpt-transcribe"
 OPENAI_TRANSCRIPTION_HINT = (
     "DeskPilot command vocabulary includes DeskPilot, Jarvis, GitHub, YouTube, "
@@ -74,8 +74,9 @@ def validate_audio_upload(content_type: str | None, audio_bytes: bytes) -> None:
 
 
 class WhisperTranscriptionService:
-    def __init__(self, model_name: str = DEFAULT_WHISPER_MODEL) -> None:
+    def __init__(self, model_name: str = DEFAULT_WHISPER_MODEL, *, language: str = "en") -> None:
         self.model_name = model_name
+        self.language = language
         self._model: object | None = None
 
     def prepare(self) -> None:
@@ -99,7 +100,9 @@ class WhisperTranscriptionService:
         temp_path = _write_temp_audio_file(audio_bytes, suffix)
 
         try:
-            segments, info = self._get_model().transcribe(temp_path)
+            segments, info = self._get_model().transcribe(
+                temp_path, language=None if self.language == "auto" else self.language,
+            )
             text = _join_segments(segments)
             language = getattr(info, "language", None)
         except Exception as error:
@@ -131,10 +134,12 @@ class OpenAITranscriptionService:
         self,
         *,
         model_name: str = OPENAI_TRANSCRIPTION_MODEL,
+        language: str = "en",
         api_key_getter: ApiKeyGetter | None = None,
         client_factory: OpenAIClientFactory | None = None,
     ) -> None:
         self.model_name = model_name
+        self.language = language
         self._api_key_getter = api_key_getter or os.getenv
         self._client_factory = client_factory or _default_openai_client_factory
 
@@ -152,11 +157,12 @@ class OpenAITranscriptionService:
         try:
             client = self._create_client()
             with open(temp_path, "rb") as audio_file:
+                language_hint = {} if self.language == "auto" else {"language": self.language}
                 transcript = client.audio.transcriptions.create(
                     model=self.model_name,
                     file=audio_file,
-                    language="en",
                     prompt=OPENAI_TRANSCRIPTION_HINT,
+                    **language_hint,
                 )
 
             text = _transcript_text(transcript)
@@ -196,6 +202,8 @@ class ProviderTranscriptionService:
         openai_service: TranscriptionService | None = None,
         api_key_getter: ApiKeyGetter | None = None,
         on_fallback: FallbackNotifier | None = None,
+        cloud_allowed: bool = False,
+        language: str = "en",
     ) -> None:
         self.provider = provider
         self.local_service = local_service or WhisperTranscriptionService()
@@ -204,6 +212,14 @@ class ProviderTranscriptionService:
             api_key_getter=self._api_key_getter
         )
         self.on_fallback = on_fallback
+        self.cloud_allowed = cloud_allowed is True
+        self.configure(language=language, cloud_allowed=cloud_allowed)
+
+    def configure(self, *, language: str, cloud_allowed: bool):
+        self.cloud_allowed = cloud_allowed is True
+        for service in (self.local_service, self.openai_service):
+            if isinstance(service, (WhisperTranscriptionService, OpenAITranscriptionService)):
+                service.language = language
 
     def transcribe(
         self,
@@ -212,12 +228,29 @@ class ProviderTranscriptionService:
         content_type: str | None,
         filename: str | None = None,
     ) -> TranscriptionResponse:
-        if self.provider == "local":
+        validate_audio_upload(content_type, audio_bytes)
+        if self.provider not in {"openai", "auto"} or not self.cloud_allowed:
+            if self.provider == "openai" and not self.cloud_allowed:
+                self._notify_fallback("Cloud processing is not allowed; using local transcription.")
             return self.local_service.transcribe(
                 audio_bytes,
                 content_type=content_type,
                 filename=filename,
             )
+
+        if self.provider == "auto":
+            local = None
+            try:
+                local = self._transcribe_with_local(audio_bytes, content_type, filename)
+                if local.text.strip():
+                    return local
+            except TranscriptionServiceError:
+                if not self._openai_api_key_available():
+                    raise
+            if not self._openai_api_key_available():
+                if local is None:
+                    raise TranscriptionServiceError("Local transcription is unavailable.")
+                return local
 
         if not self._openai_api_key_available():
             if self.provider == "openai":
@@ -227,11 +260,14 @@ class ProviderTranscriptionService:
             return self._transcribe_with_local(audio_bytes, content_type, filename)
 
         try:
-            return self.openai_service.transcribe(
+            result = self.openai_service.transcribe(
                 audio_bytes,
                 content_type=content_type,
                 filename=filename,
             )
+            if not result.text.strip():
+                raise TranscriptionServiceError("Cloud transcription returned no text.")
+            return result
         except TranscriptionServiceError as error:
             self._notify_fallback(
                 "OpenAI transcription is unavailable; using local transcription."
@@ -285,7 +321,7 @@ def _write_temp_audio_file(audio_bytes: bytes, suffix: str) -> str:
 def _default_openai_client_factory(api_key: str) -> object:
     from openai import OpenAI
 
-    return OpenAI(api_key=api_key)
+    return OpenAI(api_key=api_key, timeout=15.0, max_retries=0)
 
 
 def _transcript_text(transcript: object) -> str:

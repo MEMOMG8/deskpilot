@@ -90,7 +90,7 @@ class VoiceModelResources:
                 "Hey Jarvis could not be prepared. Check your connection and free disk space, then retry."
             ) from error
         check_cancelled(cancel)
-        progress("2 of 2 · Preparing local English transcription. Missing files will download; this may take several minutes.")
+        progress("2 of 2 · Preparing local multilingual transcription. Missing files will download; this may take several minutes.")
         try:
             self.local_service.prepare()
         except Exception as error:

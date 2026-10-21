@@ -1,6 +1,5 @@
 """Native setup dialog. Device checks and model preparation never run on Qt's UI thread."""
 
-import os
 import threading
 
 from PySide6.QtCore import Signal
@@ -75,28 +74,39 @@ class VoiceSetupDialog(QDialog):
         self.prepare_button = QPushButton("Prepare voice models")
         layout.addWidget(self.prepare_button)
         self.model_status = self._text(
-            layout, "Models ready." if resources.ready else "Hey Jarvis and local English transcription have not been checked yet."
+            layout, "Models ready." if resources.ready else "Hey Jarvis and local multilingual transcription have not been checked yet."
         )
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setTextVisible(False)
         self.progress.hide()
         layout.addWidget(self.progress)
-        self.local_mode = QCheckBox("Use local transcription and command matching (no cloud)")
-        # Existing configured cloud users retain their preference unless they opt in.
-        self.local_mode.setChecked(
-            (settings.voice_transcription_provider == "local"
-             and settings.voice_command_interpreter_provider == "local")
-            or (settings.voice_transcription_provider == "auto"
-                and settings.voice_command_interpreter_provider == "auto"
-                and not os.getenv("OPENAI_API_KEY"))
-        )
-        layout.addWidget(self.local_mode)
+        self._text(layout, "Processing mode")
+        self.mode = QComboBox()
+        self.mode.setAccessibleName("Processing mode")
+        for label, value in (("Local · offline", "local"), ("Cloud · online", "openai"), ("Automatic · local first", "auto")):
+            self.mode.addItem(label, value)
+        self.mode.setCurrentIndex(max(0, self.mode.findData(settings.voice_command_interpreter_provider)))
+        layout.addWidget(self.mode)
+        self.cloud_consent = QCheckBox("Allow sending command audio and text to OpenAI")
+        self.cloud_consent.setChecked(settings.cloud_processing_allowed)
+        layout.addWidget(self.cloud_consent)
         self._text(
             layout,
-            "Unchecked keeps your current provider settings. If configured, cloud providers may receive "
-            "a short command recording or transcript. Models are prepared locally as a fallback either way.",
+            "Local never sends audio or text to a cloud service. Automatic uses local transcription and "
+            "interpretation first. Cloud services require an internet connection and your configured "
+            "OPENAI_API_KEY, and may incur usage charges. A key alone does not enable cloud access. "
+            "Your notes, files and history are not sent. Models are prepared for offline fallback.",
         )
+        self._text(layout, "Spoken command language")
+        self.language = QComboBox()
+        self.language.setAccessibleName("Spoken command language")
+        for label, value in (("English", "en"), ("Español", "es"), ("Detect automatically (less reliable for short phrases)", "auto")):
+            self.language.addItem(label, value)
+        self.language.setCurrentIndex(max(0, self.language.findData(settings.voice_language)))
+        layout.addWidget(self.language)
+        self._text(layout, "Media phrases: “pause the song”, “make it louder”, “pausa la canción”, "
+                   "“sube el volumen”. Wake word stays “Hey Jarvis”. Other exact commands and responses stay in English.")
         self._text(
             layout,
             "3. After saving: open the tray menu → Start wake word listening. Say “Hey Jarvis”, "
@@ -149,7 +159,7 @@ class VoiceSetupDialog(QDialog):
         self.refresh_devices()
 
     def _update_controls(self):
-        for widget in (self.microphone, self.refresh_button, self.local_mode, self.prepare_button):
+        for widget in (self.microphone, self.refresh_button, self.mode, self.cloud_consent, self.language, self.prepare_button):
             widget.setEnabled(not self._busy)
         self.test_button.setEnabled(not self._busy and self.microphone.count() > 0)
         self.save_button.setEnabled(not self._busy and self._mic_ok and self.resources.ready)
@@ -241,7 +251,8 @@ class VoiceSetupDialog(QDialog):
             return
         try:
             settings = self.store.save_voice_setup(
-                self._selection, use_local=self.local_mode.isChecked()
+                self._selection, mode=self.mode.currentData(),
+                cloud_allowed=self.cloud_consent.isChecked(), language=self.language.currentData(),
             )
         except SettingsStoreError as error:
             self.status.setText(str(error))

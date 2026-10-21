@@ -25,7 +25,7 @@ from deskpilot_backend.commands import (
 
 OPENAI_COMMAND_INTERPRETER_MODEL = "gpt-6-luna"
 COMMAND_CLARIFICATION_TTL_SECONDS = 20.0
-DEFAULT_COMMAND_INTERPRETER_PROVIDER = "auto"
+DEFAULT_COMMAND_INTERPRETER_PROVIDER = "local"
 InterpreterProvider = Literal["auto", "local", "openai"]
 ApiKeyGetter = Callable[[str], str | None]
 OpenAIClientFactory = Callable[[str], object]
@@ -83,16 +83,16 @@ class ClarificationStore:
             return None
 
         normalized_text = normalize_command_text(text)
-        if normalized_text in {"cancel", "never mind"}:
+        if normalized_text in {"cancel", "never mind", "cancelar", "cancela", "olvidalo", "olvídalo"}:
             self.clear()
             return "cancel"
 
-        if normalized_text == "first option" and len(self._pending.candidates) >= 1:
+        if normalized_text in {"first option", "primera opcion", "primera opción"} and len(self._pending.candidates) >= 1:
             command_id = self._pending.candidates[0]
             self.clear()
             return command_id
 
-        if normalized_text == "second option" and len(self._pending.candidates) >= 2:
+        if normalized_text in {"second option", "segunda opcion", "segunda opción"} and len(self._pending.candidates) >= 2:
             command_id = self._pending.candidates[1]
             self.clear()
             return command_id
@@ -321,13 +321,17 @@ def _function_tool(
 
 def _interpreter_instructions() -> str:
     return (
-        "You interpret one English DeskPilot transcript into exactly one function "
+        "You interpret one English or Spanish DeskPilot transcript into exactly one function "
         "call. Do not execute actions. Do not call built-in tools. Use only the "
         "provided functions. Prefer choose_fixed_command when the request clearly "
         "maps to an existing fixed command. Use create_note, create_reminder, or "
         "safe_search only for those exact supported user intents. Ask clarification "
         "only when one or two fixed command choices are plausible. Otherwise use "
-        "unknown_command."
+        "unknown_command. Never turn negation, quoted examples, questions about commands, "
+        "or multiple requested actions into a single affirmative command. "
+        "Use ask_clarification for ambiguous media requests. Music commands operate "
+        "on the active Windows player, not Spotify Web API. Do not promise a particular "
+        "song, playlist, absolute volume, seek position, or mute state."
     )
 
 
@@ -369,4 +373,4 @@ def _required_string(arguments: dict[str, object], key: str) -> str:
 def _default_openai_client_factory(api_key: str) -> object:
     from openai import OpenAI
 
-    return OpenAI(api_key=api_key)
+    return OpenAI(api_key=api_key, timeout=12.0, max_retries=0)

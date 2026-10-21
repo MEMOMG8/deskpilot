@@ -47,6 +47,19 @@ class FakeTranscriptionService:
         )
 
 
+def test_preferences_reconfigure_shared_transcriber_and_revoke_consent():
+    from deskpilot_backend.desktop_voice import apply_native_voice_preferences
+    from deskpilot_backend.settings import DeskPilotSettings
+    from deskpilot_backend.transcription import ProviderTranscriptionService
+    transcriber = ProviderTranscriptionService(provider="openai", cloud_allowed=True)
+    service = NativeVoiceCommandService(transcription_service=transcriber)
+    apply_native_voice_preferences(service, DeskPilotSettings(voice_language="es"))
+    assert service._get_transcription_service() is transcriber
+    assert transcriber.provider == "local"
+    assert not transcriber.cloud_allowed
+    assert transcriber.local_service.language == transcriber.openai_service.language == "es"
+
+
 class RecordingLauncher:
     def __init__(self) -> None:
         self.commands: list[list[str]] = []
@@ -541,16 +554,17 @@ def test_native_voice_cloud_interpreter_failure_recovers_without_action(
         cue_player=no_op_cue,
         on_recoverable_error=recoverable_errors.append,
         voice_command_interpreter_provider="openai",
+        cloud_processing_allowed=True,
     )
 
     response = service.run()
 
     assert response.assistant.intent == "unknown"
     assert response.assistant.status == "not_supported"
-    assert response.assistant.message == NATIVE_UNKNOWN_COMMAND_MESSAGE
+    assert response.assistant.message == "Natural-language command understanding is unavailable."
     assert launcher.commands == []
     assert interpreter.calls == ["Please open paint"]
     assert recoverable_errors == [
         "Natural-language command understanding is unavailable."
     ]
-    assert engine.spoken_text == [NATIVE_UNKNOWN_COMMAND_MESSAGE]
+    assert engine.spoken_text == ["Natural-language command understanding is unavailable."]

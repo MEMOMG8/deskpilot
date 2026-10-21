@@ -45,7 +45,7 @@ def test_invalid_capture_duration_falls_back_to_safe_default() -> None:
     assert settings.warnings
 
 
-def test_invalid_voice_transcription_provider_falls_back_to_auto() -> None:
+def test_invalid_voice_transcription_provider_falls_back_to_local() -> None:
     settings = parse_settings(
         {
             "version": 1,
@@ -59,7 +59,7 @@ def test_invalid_voice_transcription_provider_falls_back_to_auto() -> None:
     )
 
     assert settings.voice_transcription_provider == DEFAULT_TRANSCRIPTION_PROVIDER
-    assert settings.warnings == ("Invalid voice transcription provider; using auto.",)
+    assert settings.warnings == ("Invalid voice transcription provider; using local.",)
 
 
 def test_invalid_default_music_app_falls_back_to_spotify() -> None:
@@ -78,7 +78,7 @@ def test_invalid_default_music_app_falls_back_to_spotify() -> None:
     assert settings.warnings == ("Invalid default music app; using spotify.",)
 
 
-def test_invalid_voice_command_interpreter_provider_falls_back_to_auto() -> None:
+def test_invalid_voice_command_interpreter_provider_falls_back_to_local() -> None:
     settings = parse_settings(
         {
             "version": 1,
@@ -95,7 +95,7 @@ def test_invalid_voice_command_interpreter_provider_falls_back_to_auto() -> None
         DEFAULT_COMMAND_INTERPRETER_PROVIDER
     )
     assert settings.warnings == (
-        "Invalid voice command interpreter provider; using auto.",
+        "Invalid voice command interpreter provider; using local.",
     )
 
 

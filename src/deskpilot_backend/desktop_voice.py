@@ -85,8 +85,10 @@ class NativeVoiceCommandService:
     on_processing_started: ProgressCallback | None = None
     on_recoverable_error: RecoverableErrorCallback | None = None
     capture_duration_seconds: int = NATIVE_COMMAND_DURATION_SECONDS
-    voice_transcription_provider: TranscriptionProvider = "auto"
-    voice_command_interpreter_provider: InterpreterProvider = "auto"
+    voice_transcription_provider: TranscriptionProvider = "local"
+    voice_command_interpreter_provider: InterpreterProvider = "local"
+    cloud_processing_allowed: bool = False
+    voice_language: str = "en"
     transcription_provider_factory: TranscriptionProviderFactory | None = None
     custom_aliases: Mapping[str, str] | None = None
     microphone_device: dict[str, str] | None = None
@@ -124,6 +126,7 @@ class NativeVoiceCommandService:
                 custom_aliases=self.custom_aliases,
                 command_interpreter=self._get_command_interpreter(),
                 command_interpreter_provider=self.voice_command_interpreter_provider,
+                cloud_processing_allowed=self.cloud_processing_allowed,
                 clarification_store=self._get_clarification_store(),
                 on_recoverable_error=self._handle_interpreter_recoverable_error,
             )
@@ -147,16 +150,24 @@ class NativeVoiceCommandService:
 
     def _get_transcription_service(self) -> TranscriptionService:
         if self.transcription_service is not None:
+            if isinstance(self.transcription_service, ProviderTranscriptionService):
+                self.transcription_service.configure(
+                    language=self.voice_language, cloud_allowed=self.cloud_processing_allowed,
+                )
+                self.transcription_service.provider = self.voice_transcription_provider
             return self.transcription_service
 
         provider_factory = (
             self.transcription_provider_factory
             or _build_provider_transcription_service
         )
-        return provider_factory(
+        service = provider_factory(
             self.voice_transcription_provider,
             self._handle_transcription_fallback,
         )
+        if isinstance(service, ProviderTranscriptionService):
+            service.configure(language=self.voice_language, cloud_allowed=self.cloud_processing_allowed)
+        return service
 
     def _handle_transcription_fallback(self, message: str) -> None:
         if self.on_recoverable_error is not None:
@@ -200,6 +211,8 @@ def apply_native_voice_preferences(
     service.voice_command_interpreter_provider = (
         settings.voice_command_interpreter_provider
     )
+    service.cloud_processing_allowed = settings.cloud_processing_allowed
+    service.voice_language = settings.voice_language
     return settings.wake_listening_on_startup
 
 
@@ -228,6 +241,10 @@ def _narrate_native_response(
         response.assistant.intent == "unknown"
         and response.assistant.status == "not_supported"
         and not response.assistant.requires_confirmation
+        and response.assistant.message in {
+            "That command is not supported yet.",
+            "I could not understand a command from that audio.",
+        }
     ):
         response.assistant.message = NATIVE_UNKNOWN_COMMAND_MESSAGE
 

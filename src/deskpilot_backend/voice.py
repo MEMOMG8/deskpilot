@@ -41,6 +41,7 @@ def handle_voice_command(
     custom_aliases: Mapping[str, str] | None = None,
     command_interpreter: CommandInterpreter | None = None,
     command_interpreter_provider: InterpreterProvider | None = None,
+    cloud_processing_allowed: bool | None = None,
     clarification_store: ClarificationStore | None = None,
     on_recoverable_error: object | None = None,
 ) -> VoiceCommandResponse:
@@ -75,6 +76,7 @@ def handle_voice_command(
         custom_aliases=custom_aliases,
         command_interpreter=command_interpreter,
         command_interpreter_provider=command_interpreter_provider,
+        cloud_processing_allowed=cloud_processing_allowed,
         clarification_store=clarification_store,
         on_recoverable_error=on_recoverable_error,
     )

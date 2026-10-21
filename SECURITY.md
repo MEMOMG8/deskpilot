@@ -1,6 +1,6 @@
 # Security Policy
 
-DeskPilot is a local-first Windows assistant. Its security model is based on deterministic command parsing, optional constrained cloud interpretation, explicit allowlists, and local-only storage.
+DeskPilot is a local-first Windows assistant. Its security model is based on deterministic command parsing, a conservative offline media classifier, optional constrained cloud interpretation, explicit allowlists, and local-only storage.
 
 ## Safety Model
 
@@ -36,7 +36,7 @@ DeskPilot uses local components for wake-word behavior, action execution, and te
 - Wake word: openWakeWord local "hey_jarvis" model
 - Speech-to-text: local `faster-whisper` model, or optional OpenAI `gpt-transcribe` for one already-recorded bounded command WAV
 - Text-to-speech: local Windows SAPI through `pyttsx3`
-- Command understanding: deterministic local parser first; optional OpenAI Responses function calling only for unknown natural-language phrasing
+- Command understanding: deterministic parser first, then offline EN/ES media classification or explicitly consented cloud interpretation; all results return through the router
 
 DeskPilot does not stream continuous microphone audio. It does not send notes, reminders, settings, history, file contents, local paths, or API keys to OpenAI as context. It must never log, print, store, or commit `OPENAI_API_KEY`, `SPOTIFY_CLIENT_ID`, Spotify access tokens, Spotify refresh tokens, OAuth authorization codes, PKCE verifiers, or sensitive request headers.
 
@@ -60,3 +60,7 @@ Please include:
 - Any logs that do not contain secrets or personal data
 
 Do not include private notes, reminders, settings, audio recordings, access tokens, or other sensitive local files in reports.
+
+## Processing Consent (DP-034)
+
+Local is the default. Both cloud providers require `cloud_processing_allowed=true` and `OPENAI_API_KEY`. Voice setup explains the upload and potential usage charges before opt-in. Old settings and a pre-existing key do not grant consent. Selecting Local revokes permission. See [DP-034](docs/dp-034-hybrid-phrases.md) for mode semantics, language support and validation limitations.
